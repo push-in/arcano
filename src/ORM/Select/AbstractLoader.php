@@ -86,6 +86,16 @@ abstract class AbstractLoader implements LoaderInterface
      */
     protected array $children;
 
+    /**
+     * Whether relations or subclasses load with this loader.
+     *
+     * @internal
+     */
+    public function hasChildren(): bool
+    {
+        return $this->load !== [] || $this->join !== [];
+    }
+
     /** @var non-empty-string */
     protected string $table;
 

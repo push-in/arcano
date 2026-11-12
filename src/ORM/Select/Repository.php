@@ -28,6 +28,13 @@ class Repository implements RepositoryInterface
 
     public function findByPK($id): ?object
     {
+        if (\is_int($id) || \is_string($id)) {
+            $plan = $this->primaryKeyPlan ??= $this->select->primaryKeyPlan() ?? false;
+            if ($plan !== false) {
+                return $this->select->fetchByPrimaryKeyPlan($plan, $id);
+            }
+        }
+
         return $this->select()->wherePK($id)->fetchOne();
     }
 
@@ -55,6 +62,7 @@ class Repository implements RepositoryInterface
     {
         $repository = clone $this;
         $repository->select->forUpdate();
+        $repository->primaryKeyPlan = false;
 
         return $repository;
     }
@@ -65,5 +73,6 @@ class Repository implements RepositoryInterface
     public function __clone()
     {
         $this->select = clone $this->select;
+        $this->primaryKeyPlan = null;
     }
 }

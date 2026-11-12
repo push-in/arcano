@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Arcano\ORM;
 
+use Arcano\Database\Injection\ParameterInterface;
+
+use Arcano\Database\Query\QueryParameters;
+
 use Arcano\Database\Driver\CursorOptions;
 use Arcano\Database\Injection\FragmentInterface;
 use Arcano\Database\Injection\Parameter;
@@ -37,6 +41,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
 
     protected int $limit = 0;
     protected int $offset = 0;
+
+    /** Whether anything changed this select since it was built for its role. */
+    private bool $customized = false;
     protected bool $allowGroupBy;
     private RootLoader $loader;
     private QueryBuilder $builder;
@@ -88,6 +95,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function from(string $table): static
     {
+        $this->customized = true;
         $this->loader->getQuery()->from(\sprintf('%s AS %s', $table, $this->loader->getAlias()));
         return $this;
     }
@@ -101,6 +109,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function distinct(): static
     {
+        $this->customized = true;
         $this->builder->distinct();
         return $this;
     }
@@ -112,6 +121,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function scope(?ScopeInterface $scope = null): self
     {
+        $scope === null or $this->customized = true;
         $this->loader->setScope($scope);
 
         return $this;
@@ -122,6 +132,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function getBuilder(): QueryBuilder
     {
+        $this->customized = true;
         return $this->builder;
     }
 
@@ -142,6 +153,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function wherePK(string|int|array|object ...$ids): self
     {
+        $this->customized = true;
         $pk = $this->loader->getPrimaryFields();
 
         if (\count($pk) > 1) {
@@ -228,6 +240,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function where(mixed ...$args): static
     {
+        $this->customized = true;
         $this->builder->where(...$args);
         return $this;
     }
@@ -247,6 +260,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function andWhere(mixed ...$args): static
     {
+        $this->customized = true;
         $this->builder->andWhere(...$args);
         return $this;
     }
@@ -271,6 +285,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orWhere(mixed ...$args): static
     {
+        $this->customized = true;
         $this->builder->orWhere(...$args);
         return $this;
     }
@@ -288,6 +303,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function having(mixed ...$args): static
     {
+        $this->customized = true;
         $this->builder->having(...$args);
         return $this;
     }
@@ -305,6 +321,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function andHaving(mixed ...$args): static
     {
+        $this->customized = true;
         $this->builder->andHaving(...$args);
         return $this;
     }
@@ -322,6 +339,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orHaving(mixed ...$args): static
     {
+        $this->customized = true;
         $this->builder->orHaving(...$args);
         return $this;
     }
@@ -348,6 +366,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orderBy(string|FragmentInterface|array $expression, ?string $direction = 'ASC'): static
     {
+        $this->customized = true;
         $this->builder->orderBy($expression, $direction);
         return $this;
     }
@@ -364,6 +383,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function forUpdate(): static
     {
+        $this->customized = true;
         $this->builder->forUpdate();
         return $this;
     }
@@ -378,6 +398,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function whereJson(string $path, mixed $value): static
     {
+        $this->customized = true;
         $this->builder->whereJson($path, $value);
         return $this;
     }
@@ -392,6 +413,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orWhereJson(string $path, mixed $value): static
     {
+        $this->customized = true;
         $this->builder->orWhereJson($path, $value);
         return $this;
     }
@@ -406,6 +428,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function whereJsonContains(string $path, mixed $value, bool $encode = true, bool $validate = true): static
     {
+        $this->customized = true;
         $this->builder->whereJsonContains($path, $value, $encode, $validate);
         return $this;
     }
@@ -420,6 +443,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orWhereJsonContains(string $path, mixed $value, bool $encode = true, bool $validate = true): static
     {
+        $this->customized = true;
         $this->builder->orWhereJsonContains($path, $value, $encode, $validate);
         return $this;
     }
@@ -433,6 +457,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function whereJsonDoesntContain(string $path, mixed $value, bool $encode = true, bool $validate = true): static
     {
+        $this->customized = true;
         $this->builder->whereJsonDoesntContain($path, $value, $encode, $validate);
         return $this;
     }
@@ -447,6 +472,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orWhereJsonDoesntContain(string $path, mixed $value, bool $encode = true, bool $validate = true): static
     {
+        $this->customized = true;
         $this->builder->orWhereJsonDoesntContain($path, $value, $encode, $validate);
         return $this;
     }
@@ -460,6 +486,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function whereJsonContainsKey(string $path): static
     {
+        $this->customized = true;
         $this->builder->whereJsonContainsKey($path);
         return $this;
     }
@@ -474,6 +501,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orWhereJsonContainsKey(string $path): static
     {
+        $this->customized = true;
         $this->builder->orWhereJsonContainsKey($path);
         return $this;
     }
@@ -487,6 +515,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function whereJsonDoesntContainKey(string $path): static
     {
+        $this->customized = true;
         $this->builder->whereJsonDoesntContainKey($path);
         return $this;
     }
@@ -501,6 +530,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orWhereJsonDoesntContainKey(string $path): static
     {
+        $this->customized = true;
         $this->builder->orWhereJsonDoesntContainKey($path);
         return $this;
     }
@@ -515,6 +545,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function whereJsonLength(string $path, int $length, string $operator = '='): static
     {
+        $this->customized = true;
         $this->builder->whereJsonLength($path, $length, $operator);
         return $this;
     }
@@ -529,6 +560,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orWhereJsonLength(string $path, int $length, string $operator = '='): static
     {
+        $this->customized = true;
         $this->builder->orWhereJsonLength($path, $length, $operator);
         return $this;
     }
@@ -617,6 +649,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function limit(int $limit): self
     {
+        $this->customized = true;
         $this->limit = $limit;
         $this->loader->getQuery()->limit($limit);
 
@@ -628,6 +661,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function offset(int $offset): self
     {
+        $this->customized = true;
         $this->offset = $offset;
         $this->loader->getQuery()->offset($offset);
 
@@ -691,6 +725,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function load(array|string $relation, LoadOptions|array $options = []): self
     {
+        $this->customized = true;
         if (\is_string($relation)) {
             $this->loader->loadRelation($relation, $options, false, true);
 
@@ -806,6 +841,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function with(string|array $relation, array $options = []): self
     {
+        $this->customized = true;
         if (\is_string($relation)) {
             $this->loader->loadRelation($relation, $options, true, false);
 
@@ -823,6 +859,70 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         }
 
         return $this;
+    }
+
+    /**
+     * The compiled query of `findByPK()` for a single key, or null when this
+     * select or its role needs the general path (scope, inheritance, eager or
+     * composite keys, any customization).
+     *
+     * @internal
+     *
+     * @return array{SelectQuery, array, int, RootLoader}|null
+     */
+    public function primaryKeyPlan(): ?array
+    {
+        $role = $this->loader->getTarget();
+        if (
+            $this->customized
+            || $this->loader->hasChildren()
+            || \count($this->loader->getPrimaryFields()) !== 1
+            || $this->schema->define($role, SchemaInterface::SCOPE) !== null
+            || $this->schema->define($role, SchemaInterface::PARENT) !== null
+            || ($this->schema->define($role, SchemaInterface::CHILDREN) ?? []) !== []
+        ) {
+            return null;
+        }
+
+        $sentinel = "\0arcano-primary-key\0";
+        $select = (clone $this)->wherePK($sentinel)->limit(1);
+        if ($select->loader->hasChildren()) {
+            return null;
+        }
+        $query = $select->loader->buildQuery();
+        $parameters = new QueryParameters();
+        $sql = $query->sqlStatement($parameters);
+        $values = $parameters->getParameters();
+        foreach ($values as $index => $value) {
+            if (($value instanceof ParameterInterface ? $value->getValue() : $value) === $sentinel) {
+                return [$query, $values, $index, $select->loader, $sql];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Runs a {@see primaryKeyPlan()} for one key.
+     *
+     * @internal
+     */
+    public function fetchByPrimaryKeyPlan(array $plan, int|string $id): ?object
+    {
+        [$query, $values, $index, $loader, $sql] = $plan;
+        $values[$index] = $values[$index] instanceof ParameterInterface ? new Parameter($id) : $id;
+        $statement = $query->getDriver()->query($sql, $values);
+        $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+        $statement->close();
+        if ($rows === []) {
+            return null;
+        }
+
+        $node = $loader->createNode();
+        $loader->parseRows($node, $rows);
+        $data = $node->getResult();
+
+        return $this->entityFactory->make($loader->getTarget(), $data[0], Node::MANAGED, typecast: true);
     }
 
     /**
@@ -1005,6 +1105,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
 
     public function loadSubclasses(bool $load = true): self
     {
+        $this->customized = true;
         $this->loader->setSubclassesLoading($load);
         return $this;
     }
@@ -1014,6 +1115,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function __call(string $name, array $arguments): mixed
     {
+        $this->customized = true;
         $result = $this->builder->__call($name, $arguments);
         if ($result instanceof QueryBuilder) {
             return $this;

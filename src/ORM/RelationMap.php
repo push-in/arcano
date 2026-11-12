@@ -103,11 +103,17 @@ final class RelationMap
     /**
      * Init relation data in entity data and entity state.
      */
-    public function init(EntityFactoryInterface $factory, Node $node, array $data): array
+    public function init(EntityFactoryInterface $factory, Node $node, array $data, bool $deferReferences = false): array
     {
+        $deferred = false;
         foreach ($this->innerRelations as $name => $relation) {
             if (!\array_key_exists($name, $data)) {
                 if ($node->hasRelation($name)) {
+                    continue;
+                }
+
+                if ($deferReferences) {
+                    $deferred = true;
                     continue;
                 }
 
@@ -127,7 +133,25 @@ final class RelationMap
             $data[$name] = $relation->init($factory, $node, $item);
         }
 
+        $deferred and $node->deferRelations($this);
+
         return $data;
+    }
+
+    /**
+     * Creates the references of the relations the node has no value for.
+     *
+     * @internal
+     */
+    public function initReferences(Node $node): void
+    {
+        foreach ($this->innerRelations as $name => $relation) {
+            if (!$node->hasRelation($name)) {
+                $reference = $relation->initReference($node);
+                $node->setRelation($name, $reference);
+                $node->setDeferredReference($name, $reference);
+            }
+        }
     }
 
     /**

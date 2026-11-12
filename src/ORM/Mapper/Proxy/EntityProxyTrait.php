@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Arcano\ORM\Mapper\Proxy;
 
+use Arcano\ORM\Heap\Node;
 use Arcano\ORM\Mapper\Proxy\Hydrator\PropertyMap;
 use Arcano\ORM\Reference\ReferenceInterface;
 use Arcano\ORM\RelationMap;
@@ -17,6 +18,12 @@ trait EntityProxyTrait
     public PropertyMap $__cycle_orm_relation_props;
     public array $__cycle_orm_rel_data = [];
 
+    /** The heap node, to read relation references created on first use. */
+    public ?Node $__arcano_node = null;
+
+    /** @var array<string, true> Deferred relations already read or assigned. */
+    public array $__arcano_read = [];
+
     public function __get(string $name)
     {
         $relation = $this->__cycle_orm_rel_map->getRelations()[$name] ?? null;
@@ -27,7 +34,11 @@ trait EntityProxyTrait
         }
 
         $value = $this->__cycle_orm_rel_data[$name] ?? null;
+        if ($value === null && $this->__arcano_node !== null && !isset($this->__arcano_read[$name])) {
+            $value = $this->__arcano_node->getDeferredReference($name);
+        }
         if ($value instanceof ReferenceInterface) {
+            $this->__arcano_read[$name] = true;
             $value = $relation->collect($relation->resolve($value, true));
             $this->$name = $value;
             unset($this->__cycle_orm_rel_data[$name]);
@@ -74,6 +85,7 @@ trait EntityProxyTrait
             return;
         }
         unset($this->__cycle_orm_rel_data[$name]);
+        $this->__arcano_read[$name] = true;
 
         $propertyClass = $this->__cycle_orm_relation_props->getPropertyClass($name);
         if ($propertyClass === PropertyMap::PUBLIC_CLASS) {
@@ -88,7 +100,7 @@ trait EntityProxyTrait
     public function __debugInfo(): array
     {
         $result = \method_exists(parent::class, '__debugInfo') ? parent::__debugInfo() : (array) $this;
-        unset($result['__cycle_orm_rel_map'], $result['__cycle_orm_rel_data'], $result['__cycle_orm_relation_props']);
+        unset($result['__cycle_orm_rel_map'], $result['__cycle_orm_rel_data'], $result['__cycle_orm_relation_props'], $result['__arcano_node'], $result['__arcano_read']);
         return $result;
     }
 }

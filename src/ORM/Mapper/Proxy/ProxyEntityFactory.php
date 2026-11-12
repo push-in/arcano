@@ -96,6 +96,12 @@ class ProxyEntityFactory
 
                 if (\array_key_exists($key, $arrayData)) {
                     $currentData[$key] = $arrayData[$key];
+                } elseif ($entity->__arcano_node !== null && !isset($entity->__arcano_read[$key])) {
+                    // Not loaded and never read: the reference the node creates on demand.
+                    $reference = $entity->__arcano_node->getDeferredReference($key);
+                    if ($reference !== null) {
+                        $currentData[$key] = $reference;
+                    }
                 }
             }
         }
@@ -124,6 +130,8 @@ class ProxyEntityFactory
             $result['__cycle_orm_rel_map'],
             $result['__cycle_orm_rel_data'],
             $result['__cycle_orm_relation_props'],
+            $result['__arcano_node'],
+            $result['__arcano_read'],
         );
 
         return $result;

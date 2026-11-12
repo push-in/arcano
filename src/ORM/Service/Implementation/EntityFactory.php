@@ -6,6 +6,7 @@ namespace Arcano\ORM\Service\Implementation;
 
 use Arcano\ORM\Heap\HeapInterface;
 use Arcano\ORM\Heap\Node;
+use Arcano\ORM\Mapper\Mapper;
 use Arcano\ORM\Reference\ReferenceInterface;
 use Arcano\ORM\Service\EntityFactoryInterface;
 use Arcano\ORM\Service\IndexProviderInterface;
@@ -44,7 +45,7 @@ final class EntityFactory implements EntityFactoryInterface
     ): object {
         $role = $data[LoaderInterface::ROLE_KEY] ?? $role;
         unset($data[LoaderInterface::ROLE_KEY]);
-        [$rRole, $relMap, $mapper, $pk, $indexes] = $this->roles[$role] ??= $this->describe($role);
+        [$rRole, $relMap, $mapper, $pk, $indexes, $deferReferences] = $this->roles[$role] ??= $this->describe($role);
 
         $castedData = $typecast ? $mapper->cast($data) : $data;
 
@@ -100,19 +101,27 @@ final class EntityFactory implements EntityFactoryInterface
         /** Entity should be attached before {@see RelationMap::init()} running */
         $this->heap->attach($e, $node, $indexes);
 
-        return $mapper->hydrate($e, $relMap->init($this, $node, $castedData));
+        if ($deferReferences) {
+            // Proxy entities read unloaded relations from their node on first use.
+            $e->__arcano_node = $node;
+        }
+
+        return $mapper->hydrate($e, $relMap->init($this, $node, $castedData, $deferReferences));
     }
 
     private function describe(string $role): array
     {
         $rRole = $this->roleResolver->resolveRole($role);
+        $mapper = $this->mapperProvider->getMapper($rRole);
 
         return [
             $rRole,
             $this->relationProvider->getRelationMap($rRole),
-            $this->mapperProvider->getMapper($rRole),
+            $mapper,
             $this->schema->define($role, SchemaInterface::PRIMARY_KEY),
             $this->indexProvider->getIndexes($rRole),
+            // Only the stock proxy mapper knows how to resolve deferred references.
+            $mapper::class === Mapper::class,
         ];
     }
 }

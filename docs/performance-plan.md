@@ -8,6 +8,9 @@ ORM 2.18.1 (`../compare.sh`). The PDO column is the floor.
 - Heap lookups without exceptions.
 - Per-role context in EntityFactory, per-class proxy plan, bound field setters.
 - No-op destructors removed (Node, State, Heap, Select, loaders, parser nodes).
+- Deferred relation references: unloaded relations get their reference on
+  first read (`Node::getDeferredReference`, proxy `__arcano_node`/`__arcano_read`).
+  Note: sqlite suite asserts 43986 vs 43877 upstream; still all green, check why.
 
 ## Read path (select_all, find_pk, eager, small_queries)
 Budget for 5x: about 0.25 µs of ORM work per row above hand-written PDO and

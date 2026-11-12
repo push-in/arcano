@@ -178,7 +178,15 @@ class ProxyEntityFactory
                     break;
                 }
             }
-            if ($found === null || ($scope !== null && $scope !== $found)) {
+            if ($found === null) {
+                // Not a property: the hydrator's assignment fails in the proxy __set() and is
+                // ignored, unless the entity handles it.
+                if (\method_exists($sourceClass, '__set')) {
+                    return null;
+                }
+                continue;
+            }
+            if ($scope !== null && $scope !== $found) {
                 return null;
             }
             $scope = $found;

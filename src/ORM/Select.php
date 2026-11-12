@@ -1211,7 +1211,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     private function fetchEager(string $role, \Closure $parentMaker, array $relations): array
     {
-        $statement = $this->addGroupByPK()->loader->buildQuery()->run();
+        $query = $this->addGroupByPK()->loader->buildQuery();
+        $whole = self::readsWholeTable($query);
+        $statement = $query->run();
         $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
         $statement->close();
         $fresh = [];
@@ -1229,14 +1231,18 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             }
             $groups = [];
             if ($keys !== []) {
-                $references = [];
-                foreach ($keys as $value) {
-                    $references[] = [$inner => $value];
+                $rows = $whole ? $this->childrenOf($loader, $outer, $keys) : null;
+                if ($rows === null) {
+                    $references = [];
+                    foreach ($keys as $value) {
+                        $references[] = [$inner => $value];
+                    }
+                    $statement = $loader->buildPostloadQuery($references)->run();
+                    $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+                    $statement->close();
                 }
-                $statement = $loader->buildPostloadQuery($references)->run();
                 $notTracked = $noNodes = null;
-                $childMaker($statement->fetchAll(StatementInterface::FETCH_NUM), $notTracked, $noNodes, $groups);
-                $statement->close();
+                $childMaker($rows, $notTracked, $noNodes, $groups);
             }
             foreach ($parents as $i => $parent) {
                 $value = $parentKeys[$i];
@@ -1254,6 +1260,50 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         }
 
         return $parents;
+    }
+
+    /**
+     * Whether the query reads every row of a single table.
+     */
+    private static function readsWholeTable(SelectQuery $query): bool
+    {
+        $tokens = $query->getTokens();
+
+        return \count($tokens['from']) === 1
+            && $tokens['join'] === []
+            && $tokens['where'] === []
+            && $tokens['having'] === []
+            && !$tokens['limit']
+            && !$tokens['offset']
+            && $tokens['union'] === []
+            && $tokens['intersect'] === []
+            && $tokens['except'] === [];
+    }
+
+    /**
+     * When the parents are the whole table, their children are the related rows whose key
+     * is one of `$keys`: the relation query without the IN list, filtered here. Null when
+     * a key value is not an integer or string, so the IN query must decide.
+     */
+    private function childrenOf(HasManyLoader $loader, string $outer, array $keys): ?array
+    {
+        $position = \array_search($outer, $loader->getColumnNames(), true);
+        $statement = $loader->buildPostloadQuery([])->run();
+        try {
+            $rows = [];
+            foreach ($statement->fetchAll(StatementInterface::FETCH_NUM) as $row) {
+                $value = $row[$position];
+                if (\is_int($value) || \is_string($value)) {
+                    isset($keys[$value]) and $rows[] = $row;
+                } elseif ($value !== null) {
+                    return null;
+                }
+            }
+        } finally {
+            $statement->close();
+        }
+
+        return $rows;
     }
 
     /**

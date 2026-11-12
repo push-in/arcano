@@ -98,6 +98,17 @@ function bench(string $name, callable $fn, int $repeat = 5): float
         $fn();
         $times[] = (hrtime(true) - $t) / 1e6;
     }
+    if (getenv('PROFILE')) {
+        $profiler = new ExcimerProfiler();
+        $profiler->setPeriod(0.0001);
+        $profiler->setEventType(EXCIMER_CPU);
+        $profiler->start();
+        for ($i = 0; $i < 30; $i++) {
+            $fn();
+        }
+        $profiler->stop();
+        file_put_contents(__DIR__ . "/profile-$name.txt", $profiler->getLog()->formatCollapsed());
+    }
     sort($times);
     return $times[intdiv(count($times), 2)];
 }
@@ -193,7 +204,8 @@ $results['find_pk'] = [
         $repo = $orm->getRepository('user');
         foreach ($ids as $i) {
             $orm->getHeap()->clean();
-            assert($repo->findByPK($i) !== null);
+            $found = $repo->findByPK($i);
+            assert($found !== null);
         }
     }),
     bench('find-pdo', function () use ($pdo, $ids) {

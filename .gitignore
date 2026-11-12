@@ -3,3 +3,4 @@ composer.lock
 runtime/
 .phpunit.result.cache
 benchmarks/results*.json
+benchmarks/profile-*.txt

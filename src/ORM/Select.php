@@ -1251,6 +1251,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                         $name,
                         $groups[(string) $value] ?? [],
                         isset($fresh[\spl_object_id($parent)]),
+                        $parentNodes[$i],
                     );
                 }
             }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Arcano\ORM\Service\Implementation;
 
+use Arcano\ORM\EntityProxyInterface;
 use Arcano\ORM\Exception\MapperException;
 use Arcano\ORM\Heap\Heap;
 use Arcano\ORM\Heap\HeapInterface;
@@ -35,6 +36,9 @@ final class EntityFactory implements EntityFactoryInterface
 
     /** @var array<string, \Closure|false> Row makers per role and column list. */
     private array $rowMakers = [];
+
+    /** @var array<class-string, bool> Proxy classes whose entity declares __unset(). */
+    private array $customUnset = [];
 
     public function __construct(
         private HeapInterface $heap,
@@ -313,8 +317,14 @@ final class EntityFactory implements EntityFactoryInterface
      *
      * @internal
      */
-    public function attachLoadedRelation(string $role, object $entity, string $name, array $elements, bool $fresh): void
-    {
+    public function attachLoadedRelation(
+        string $role,
+        object $entity,
+        string $name,
+        array $elements,
+        bool $fresh,
+        ?Node $node = null,
+    ): void {
         [, $relMap, $mapper] = $this->roles[$role] ??= $this->describe($role);
         if (!$fresh) {
             $fetched = $mapper->fetchRelations($entity);
@@ -323,8 +333,23 @@ final class EntityFactory implements EntityFactoryInterface
             }
         }
         $relation = $relMap->getRelations()[$name];
-        $this->heap->get($entity)?->setRelation($name, $elements);
-        $mapper->hydrate($entity, [$name => $relation->collect($elements)]);
+        ($node ?? $this->heap->get($entity))?->setRelation($name, $elements);
+        $value = $relation->collect($elements);
+
+        // A new proxy still has the relation unset: its __set() is what the hydrator ends in.
+        if ($fresh && $entity instanceof EntityProxyInterface
+            && !($this->customUnset[$entity::class] ??= \method_exists(\get_parent_class($entity), '__unset'))) {
+            try {
+                $entity->__set($name, $value);
+            } catch (\TypeError $e) {
+                throw new MapperException(
+                    "Can't hydrate an entity because property and value types are incompatible.",
+                    previous: $e,
+                );
+            }
+            return;
+        }
+        $mapper->hydrate($entity, [$name => $value]);
     }
 
     private function describe(string $role): array

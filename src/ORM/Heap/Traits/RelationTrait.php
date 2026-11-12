@@ -35,8 +35,9 @@ trait RelationTrait
 
     public function setRelation(string $name, mixed $context): void
     {
-        $this->deferredRelations === null or $this->initDeferredRelations();
+        // Set first, so no deferred reference is created for it just to be replaced.
         $this->relations[$name] = $context;
+        $this->deferredRelations === null or $this->initDeferredRelations();
         unset($this->data[$name]);
     }
 

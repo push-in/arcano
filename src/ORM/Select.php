@@ -79,7 +79,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
 
     private const RECORDABLE_OPERATORS = [
         '=' => true, '!=' => true, '<>' => true, '>' => true, '<' => true, '>=' => true, '<=' => true,
-        'like' => true, 'not like' => true,
+        'like' => true, 'not like' => true, 'LIKE' => true, 'NOT LIKE' => true,
     ];
 
     /**
@@ -1048,20 +1048,23 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         switch ($method) {
             case 'where':
                 $count = \count($args);
-                if (!\array_is_list($args) || ($count !== 2 && $count !== 3)) {
+                if ($count === 2 && \array_is_list($args)) {
+                    [$column, $value] = $args;
+                    $operator = '=';
+                } elseif ($count === 3 && \array_is_list($args)) {
+                    [$column, $operator, $value] = $args;
+                } else {
                     return false;
                 }
-                $value = $args[$count - 1];
-                $operator = $count === 3 ? $args[1] : '=';
                 if (
-                    !\is_string($args[0])
+                    !\is_string($column)
                     || !\is_string($operator)
-                    || !isset(self::RECORDABLE_OPERATORS[\strtolower($operator)])
+                    || !isset(self::RECORDABLE_OPERATORS[$operator])
                     || !\is_scalar($value)
                 ) {
                     return false;
                 }
-                $this->shape .= "w{$count}\0{$args[0]}\0{$operator}\1";
+                $this->shape .= "w{$count}\0{$column}\0{$operator}\1";
                 break;
             case 'orderBy':
                 if (!\is_string($args[0]) || ($args[1] !== null && !\is_string($args[1]))) {

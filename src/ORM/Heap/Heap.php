@@ -104,7 +104,7 @@ final class Heap implements HeapInterface, \IteratorAggregate
      */
     public function attachLoaded(object $entity, Node $node, string $role, array $data, array $keys): void
     {
-        $this->storage->offsetSet($entity, $node);
+        $this->storage[$entity] = $node;
         foreach ($keys as $key) {
             if (isset($data[$key])) {
                 $this->paths[$role][$key][(string) $data[$key]] = $entity;

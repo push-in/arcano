@@ -496,6 +496,39 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
      */
     protected function statement(string $query, iterable $parameters = [], bool $retry = true): StatementInterface
     {
+        if ($this->logger !== null) {
+            return $this->loggedStatement($query, $parameters, $retry);
+        }
+
+        try {
+            $statement = $this->bindParameters($this->prepare($query), $parameters);
+            $statement->execute();
+
+            return new Statement($statement);
+        } catch (\Throwable $e) {
+            // A failed statement can't be reused: SQLite reports API misuse on the next bind.
+            unset($this->queryCache[$query]);
+            $e = $this->mapException($e, Interpolator::interpolate($query, $parameters));
+
+            if (
+                $retry
+                && $this->transactionLevel === 0
+                && $e instanceof StatementException\ConnectionException
+            ) {
+                $this->disconnect();
+
+                return $this->statement($query, $parameters, false);
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * {@see statement()} with query logging.
+     */
+    private function loggedStatement(string $query, iterable $parameters, bool $retry): StatementInterface
+    {
         $queryStart = \microtime(true);
 
         try {

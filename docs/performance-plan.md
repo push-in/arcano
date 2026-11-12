@@ -12,6 +12,17 @@ ORM 2.18.1 (`../compare.sh`). The PDO column is the floor.
   first read (`Node::getDeferredReference`, proxy `__arcano_node`/`__arcano_read`).
   Note: sqlite suite asserts 43986 vs 43877 upstream; still all green, check why.
 
+- `findByPK` fast path: SQL compiled once per repository (pristine select,
+  no scope/inheritance/eager/composite), row named with array_combine.
+- Proxies cloned from a prepared prototype per class and relation map.
+- Generated field hydrators per entity class (strict_types like before).
+- Benchmarks take the fastest of N runs (tars has other agents running).
+
+## Status (fastest run, ms; Cycle / Eloquent / Arcano / PDO)
+insert 335/322/147/12, select_all 6.3/2.3/3.7/0.8, find_pk 21.9/41.9/5.9/1.7,
+eager 39.4/30.9/39.8/4.7, update 43/63/37/1.8, small 51/61/38/5.4.
+Per-entity `EntityFactory::make` (~2.7 µs) is now the bottleneck everywhere.
+
 ## Read path (select_all, find_pk, eager, small_queries)
 Budget for 5x: about 0.25 µs of ORM work per row above hand-written PDO and
 about 3 µs per query. Cycle spends ~3 µs per row and ~10-25 µs per query.

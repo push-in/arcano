@@ -150,11 +150,8 @@ final class State
                 $result[$field] = $value;
                 continue;
             }
-            $c = Node::compare(
-                $value,
-                \array_key_exists($field, $this->transactionRaw) ? $this->transactionRaw[$field] : $this->transactionData[$field],
-            );
-            if ($c !== 0) {
+            $old = \array_key_exists($field, $this->transactionRaw) ? $this->transactionRaw[$field] : $this->transactionData[$field];
+            if ($value !== $old && Node::compare($value, $old) !== 0) {
                 $result[$field] = $value;
             }
         }

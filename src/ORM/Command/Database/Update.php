@@ -92,13 +92,10 @@ final class Update extends StoreCommand implements ScopeCarrierInterface
         $fields = \array_keys($changes);
         if ($data !== [] || $this->columns !== []) {
             $scope = $this->scope;
-            $this->affectedRows = $this->db
-                ->update(
-                    $this->table,
-                    \array_merge($this->columns, $data),
-                    $this->prepareData($scope),
-                )
-                ->run();
+            $values = \array_merge($this->columns, $data);
+            $where = $this->prepareData($scope);
+            $this->affectedRows = StatementPlans::update($this->db, $this->table, $values, $where)
+                ?? $this->db->update($this->table, $values, $where)->run();
         }
 
         $this->state->updateTransactionData(

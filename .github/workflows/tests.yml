@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: ${{ matrix.suite }} / PHP ${{ matrix.php }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+        suite: [unit, sqlite, mysql, postgres, sqlserver]
+        exclude:
+          - php: '8.5'
+            suite: sqlserver
+    services:
+      mysql:
+        image: ${{ matrix.suite == 'mysql' && 'mysql:8.0' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: YourStrong!Passw0rd
+          MYSQL_DATABASE: spiral
+        ports: ['13306:3306']
+        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: ${{ matrix.suite == 'postgres' && 'postgres:16-alpine' || '' }}
+        env:
+          POSTGRES_PASSWORD: YourStrong!Passw0rd
+          POSTGRES_DB: spiral
+        ports: ['15432:5432']
+        options: --health-cmd="pg_isready" --health-interval=5s --health-timeout=5s --health-retries=20
+      sqlserver:
+        image: ${{ matrix.suite == 'sqlserver' && 'mcr.microsoft.com/mssql/server:2022-latest' || '' }}
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: YourStrong!Passw0rd
+        ports: ['11433:1433']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_sqlite, pdo_mysql, pdo_pgsql, ${{ matrix.suite == 'sqlserver' && 'sqlsrv, pdo_sqlsrv' || '' }}
+          coverage: none
+      - uses: ramsey/composer-install@v3
+      - name: Wait for SQL Server
+        if: matrix.suite == 'sqlserver'
+        run: |
+          for i in $(seq 60); do
+            php -r 'try { new PDO("sqlsrv:Server=127.0.0.1,11433;TrustServerCertificate=true", "SA", "YourStrong!Passw0rd"); exit(0); } catch (Throwable) { exit(1); }' && exit 0
+            sleep 3
+          done
+          exit 1
+      - run: vendor/bin/phpunit --testsuite ${{ matrix.suite }}

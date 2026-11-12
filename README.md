@@ -9,7 +9,8 @@ the hot paths (hydration, heap, eager loading, unit of work) were rewritten.
 composer require pushinbr/arcano
 ```
 
-Drivers: SQLite, MySQL, PostgreSQL and SQL Server.
+Drivers: SQLite, MySQL, PostgreSQL and SQL Server. Includes the schema builder,
+attribute entities and migrations (forks of the matching Cycle packages).
 
 ## Overhead
 
@@ -28,19 +29,79 @@ neither, which bounds the select_all gap. Details in
 ## Usage
 
 ```php
+use Arcano\Annotated\Annotation\{Column, Entity};
+use Arcano\Annotated\Annotation\Relation\HasMany;
+
+#[Entity(role: 'author')]
+class Author
+{
+    #[Column(type: 'primary')]
+    public ?int $id = null;
+
+    #[Column(type: 'string(120)')]
+    public string $name = '';
+
+    /** @var list<Post> */
+    #[HasMany(target: Post::class, collection: 'array')]
+    public array $posts = [];
+}
+```
+
+Compile the schema once (cache the array in production) and build the ORM:
+
+```php
+use Arcano\Annotated\{Entities, MergeColumns, MergeIndexes, TableInheritance, Embeddings};
+use Arcano\Annotated\Locator\{TokenizerEmbeddingLocator, TokenizerEntityLocator};
 use Arcano\Database\Config\DatabaseConfig;
 use Arcano\Database\DatabaseManager;
 use Arcano\ORM\{EntityManager, Factory, ORM, Schema};
+use Arcano\Schema\{Compiler, Registry};
+use Arcano\Schema\Generator as G;
+use Spiral\Tokenizer\{Config\TokenizerConfig, Tokenizer};
 
 $dbal = new DatabaseManager(new DatabaseConfig([...]));
-$orm = new ORM(new Factory($dbal), new Schema([...]));
+$classes = (new Tokenizer(new TokenizerConfig(['directories' => ['src/Entities']])))->classLocator();
 
-$user = $orm->getRepository(User::class)->findByPK(1);
-(new EntityManager($orm))->persist($user)->run();
+$schema = (new Compiler())->compile(new Registry($dbal), [
+    new G\ResetTables(),
+    new Embeddings(new TokenizerEmbeddingLocator($classes)),
+    new Entities(new TokenizerEntityLocator($classes)),
+    new TableInheritance(),
+    new MergeColumns(),
+    new G\GenerateRelations(),
+    new G\GenerateModifiers(),
+    new G\ValidateEntities(),
+    new G\RenderTables(),
+    new G\RenderRelations(),
+    new G\RenderModifiers(),
+    new G\ForeignKeys(),
+    new MergeIndexes(),
+    new G\GenerateTypecast(),
+]);
+
+$orm = new ORM(new Factory($dbal), new Schema($schema));
+
+$author = $orm->getRepository(Author::class)->select()->load('posts')->wherePK(1)->fetchOne();
+(new EntityManager($orm))->persist($author)->run();
 ```
 
-Schemas, relations, mappers and typecasting follow the
-[Cycle ORM documentation](https://cycle-orm.dev/docs).
+Migrations: `Arcano\Migrations\Migrator` runs the files of a directory, and
+`Arcano\Schema\Generator\Migrations\GenerateMigrations` (added to the
+generators above) writes a migration with the difference between the entities
+and the database. In PAM HTTP, `ArcanoServiceProvider`, `ArcanoSchemaCompiler`
+and `ArcanoMigrationManager` wire all of this.
+
+Schemas, relations, mappers, typecasting, attributes and migrations follow the
+Cycle documentation ([ORM](https://cycle-orm.dev/docs),
+[attributes](https://cycle-orm.dev/docs/annotated-prerequisites),
+[migrations](https://cycle-orm.dev/docs/database-migrations)) with the
+`Arcano\` namespaces.
+
+## Tests
+
+`vendor/bin/phpunit --testsuite <unit|sqlite|mysql|postgres|sqlserver>`. The
+server suites expect MySQL on 13306, PostgreSQL on 15432 and SQL Server on
+11433 (see `tests/bootstrap-*.php` and `.github/workflows/tests.yml`).
 
 ## License
 

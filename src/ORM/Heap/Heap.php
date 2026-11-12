@@ -28,11 +28,8 @@ final class Heap implements HeapInterface, \IteratorAggregate
 
     public function get(object $entity): ?Node
     {
-        try {
-            return $this->storage->offsetGet($entity);
-        } catch (\UnexpectedValueException) {
-            return null;
-        }
+        // A miss is the common case for new entities: no exception round trip.
+        return $this->storage->offsetExists($entity) ? $this->storage->offsetGet($entity) : null;
     }
 
     public function find(string $role, array $scope): ?object

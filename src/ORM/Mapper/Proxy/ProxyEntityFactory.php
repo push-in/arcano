@@ -121,6 +121,55 @@ class ProxyEntityFactory
     }
 
     /**
+     * Generated closure that clones the prepared proxy, assigns the given fields
+     * and links the heap node. Null when a field is not a declared property of a
+     * single scope or the class can't be cloned.
+     *
+     * @param list<non-empty-string> $fields
+     *
+     * @return null|\Closure(array, \Arcano\ORM\Heap\Node): object
+     */
+    public function compileRowHydrator(RelationMap $relMap, string $sourceClass, array $fields): ?\Closure
+    {
+        $sample = $this->create($relMap, $sourceClass);
+        $prototype = $this->prototypes[$sourceClass][\spl_object_id($relMap)] ?? null;
+        if ($prototype === null) {
+            return null;
+        }
+
+        $relations = $relMap->getRelations();
+        $declared = $this->getEntityProperties($sample, $relMap)[ClassPropertiesExtractor::KEY_FIELDS]->getProperties();
+        $scope = null;
+        $code = '';
+        foreach ($fields as $field) {
+            if (isset($relations[$field]) || \str_starts_with($field, '__')
+                || \preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $field) !== 1) {
+                return null;
+            }
+            $found = null;
+            foreach ($declared as $name => $properties) {
+                if (\in_array($field, $properties, true)) {
+                    $found = $name;
+                    break;
+                }
+            }
+            if ($found === null || ($scope !== null && $scope !== $found)) {
+                return null;
+            }
+            $scope = $found;
+            $key = \var_export($field, true);
+            $code .= "\$o->{$field} = \$d[{$key}];\n";
+        }
+
+        $hydrator = eval(
+            "declare(strict_types=1);\nreturn static function (array \$d, \\Arcano\\ORM\\Heap\\Node \$n) use (\$prototype): object {\n"
+            . "\$o = clone \$prototype;\n{$code}\$o->__arcano_node = \$n;\nreturn \$o;\n};"
+        );
+
+        return $scope === null || $scope === '' ? $hydrator : \Closure::bind($hydrator, null, $scope);
+    }
+
+    /**
      * Get an entity relation column values as array, except primitive columns.
      *
      * @return array array<string, mixed>

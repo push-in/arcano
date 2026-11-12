@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Arcano\ORM\Mapper;
 
+use Arcano\ORM\Parser\Typecast;
 use Arcano\ORM\Command\CommandInterface;
 use Arcano\ORM\Command\Database\Delete;
 use Arcano\ORM\Command\Database\Insert;
@@ -69,6 +70,20 @@ abstract class DatabaseMapper implements MapperInterface
         foreach ($this->primaryKeys as $PK) {
             $this->primaryColumns[] = $this->columns[$PK] ?? $PK;
         }
+    }
+
+    /**
+     * Plain cast rules ({@see Typecast::plainRules()}) or null when a rule needs code.
+     *
+     * @internal
+     */
+    public function plainCastRules(): ?array
+    {
+        return match (true) {
+            $this->typecast === null => [],
+            $this->typecast instanceof Typecast => $this->typecast->plainRules(),
+            default => null,
+        };
     }
 
     public function getRole(): string

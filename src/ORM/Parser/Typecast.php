@@ -49,6 +49,9 @@ final class Typecast implements CastableInterface, UncastableInterface
     /** @var array<non-empty-string, \Closure(mixed): mixed> */
     private array $uncasters = [];
 
+    /** @var array<non-empty-string, 'int'|'bool'|'float'> Rules that are a plain PHP cast. */
+    private array $plain = [];
+
     /**
      * @param non-empty-string $role The role of the entity being typecasted
      * @param DatabaseInterface $database The database instance used for typecasting
@@ -63,6 +66,11 @@ final class Typecast implements CastableInterface, UncastableInterface
         foreach ($rules as $key => $rule) {
             // Static rules
             if (\in_array($rule, self::RULES, true)) {
+                if ($rule === 'int' || $rule === 'bool' || $rule === 'float') {
+                    $this->plain[$key] = $rule;
+                } else {
+                    unset($this->plain[$key]);
+                }
                 $this->casters[$key] = match ($rule) {
                     'int' => static fn(mixed $value): int => (int) $value,
                     'bool' => static fn(mixed $value): bool => (bool) $value,
@@ -145,6 +153,19 @@ final class Typecast implements CastableInterface, UncastableInterface
         }
 
         return $rules;
+    }
+
+    /**
+     * The rules as plain casts (`int`, `bool`, `float`) when every rule is one,
+     * so callers can compile them; null otherwise.
+     *
+     * @internal
+     *
+     * @return array<non-empty-string, 'int'|'bool'|'float'>|null
+     */
+    public function plainRules(): ?array
+    {
+        return \count($this->plain) === \count($this->casters) ? $this->plain : null;
     }
 
     public function cast(array $data): array

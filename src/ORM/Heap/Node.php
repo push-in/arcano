@@ -38,8 +38,10 @@ final class Node
         private int $status,
         private array $data,
         private string $role,
+        bool $scalar = false,
     ) {
-        $this->updateRawData();
+        // Scalar data has no objects to keep a solid copy of.
+        $scalar or $this->updateRawData();
     }
 
     /**

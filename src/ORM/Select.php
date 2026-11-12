@@ -15,6 +15,7 @@ use Arcano\Database\Injection\FragmentInterface;
 use Arcano\Database\Injection\Parameter;
 use Arcano\Database\Query\SelectQuery;
 use Arcano\Database\StatementInterface;
+use Arcano\ORM\Service\Implementation\EntityFactory;
 use Arcano\ORM\Heap\Node;
 use Arcano\ORM\Select\Options\LoadOptions;
 use Arcano\ORM\Service\EntityFactoryInterface;
@@ -897,7 +898,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $values = $parameters->getParameters();
         foreach ($values as $index => $value) {
             if (($value instanceof ParameterInterface ? $value->getValue() : $value) === $sentinel) {
-                return [$query->getDriver(), $sql, $values, $index, $select->loader->getTarget(), $select->loader->getColumnNames()];
+                return [$query->getDriver(), $sql, $values, $index, $select->loader->getTarget(), $select->loader->getColumnNames(), $select->rowMaker()];
             }
         }
 
@@ -911,13 +912,17 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function fetchByPrimaryKeyPlan(array $plan, int|string $id): ?object
     {
-        [$driver, $sql, $values, $index, $role, $columns] = $plan;
+        [$driver, $sql, $values, $index, $role, $columns, $maker] = $plan;
         $values[$index] = $values[$index] instanceof ParameterInterface ? new Parameter($id) : $id;
         $statement = $driver->query($sql, $values);
         $row = $statement->fetch(StatementInterface::FETCH_NUM);
         $statement->close();
         if ($row === false) {
             return null;
+        }
+
+        if ($maker !== null) {
+            return $maker([$row])[0];
         }
 
         // A root-only row: the parser would only name its columns.
@@ -949,7 +954,26 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function fetchAll(): iterable
     {
-        return \iterator_to_array($this->getIterator(), false);
+        $maker = $this->rowMaker();
+        if ($maker === null) {
+            return \iterator_to_array($this->getIterator(), false);
+        }
+
+        $statement = $this->addGroupByPK()->loader->buildQuery()->run();
+        $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+        $statement->close();
+
+        return $maker($rows);
+    }
+
+    /**
+     * Rows to entities without the parser when only the root table is loaded.
+     */
+    private function rowMaker(): ?\Closure
+    {
+        return !$this->loader->hasChildren() && $this->entityFactory instanceof EntityFactory
+            ? $this->entityFactory->rowMaker($this->loader->getTarget(), $this->loader->getColumnNames())
+            : null;
     }
 
     /**

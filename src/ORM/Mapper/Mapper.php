@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Arcano\ORM\Mapper;
 
+use Arcano\ORM\Heap\Node;
 use Arcano\ORM\Mapper\Traits\SingleTableTrait;
 use Arcano\ORM\ORMInterface;
 use Arcano\ORM\Mapper\Proxy\ProxyEntityFactory;
@@ -40,6 +41,23 @@ class Mapper extends DatabaseMapper
     {
         $class = $this->resolveClass($data, $role);
         return $this->entityFactory->create($this->relationMap, $class);
+    }
+
+    /**
+     * A closure that builds a managed entity straight from loaded field data,
+     * or null when the class needs the generic path.
+     *
+     * @internal
+     *
+     * @param list<non-empty-string> $fields
+     *
+     * @return null|\Closure(array, Node): object
+     */
+    public function compileRowHydrator(array $fields): ?\Closure
+    {
+        return $this->children === []
+            ? $this->entityFactory->compileRowHydrator($this->relationMap, $this->entity, $fields)
+            : null;
     }
 
     public function hydrate(object $entity, array $data): object

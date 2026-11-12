@@ -85,6 +85,33 @@ final class Heap implements HeapInterface, \IteratorAggregate
         return $result;
     }
 
+    /**
+     * Finds an entity by a single-column index.
+     *
+     * @internal
+     */
+    public function findKey(string $role, string $key, string $value): ?object
+    {
+        return $this->paths[$role][$key][$value] ?? null;
+    }
+
+    /**
+     * Attaches an entity loaded from the database, indexed by single-column keys.
+     *
+     * @internal
+     *
+     * @param list<string> $keys
+     */
+    public function attachLoaded(object $entity, Node $node, string $role, array $data, array $keys): void
+    {
+        $this->storage->offsetSet($entity, $node);
+        foreach ($keys as $key) {
+            if (isset($data[$key])) {
+                $this->paths[$role][$key][(string) $data[$key]] = $entity;
+            }
+        }
+    }
+
     public function attach(object $entity, Node $node, array $index = []): void
     {
         $this->storage->offsetSet($entity, $node);

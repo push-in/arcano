@@ -19,6 +19,9 @@ final class State
 
     private array $transactionData;
 
+    /** Memoized {@see getChanges()}; reset by every write to the data or status. */
+    private ?array $changes = null;
+
     /** @var array<string, int> */
     private array $relationStatus = [];
 
@@ -69,6 +72,7 @@ final class State
      */
     public function setStatus(int $state): void
     {
+        $this->changes = null;
         $this->state = $state;
     }
 
@@ -85,6 +89,7 @@ final class State
      */
     public function setData(array $data): void
     {
+        $this->changes = null;
         foreach ($data as $column => $value) {
             $this->register($column, $value);
         }
@@ -108,6 +113,7 @@ final class State
 
     public function updateTransactionData(?array $fields = null): void
     {
+        $this->changes = null;
         if ($fields === null) {
             foreach ($this->data as $field => $value) {
                 $this->transactionData[$field] = $value;
@@ -144,6 +150,9 @@ final class State
         if ($this->state === Node::NEW) {
             return $this->data;
         }
+        if ($this->changes !== null) {
+            return $this->changes;
+        }
         $result = [];
         foreach ($this->data as $field => $value) {
             if (!\array_key_exists($field, $this->transactionData)) {
@@ -155,7 +164,7 @@ final class State
                 $result[$field] = $value;
             }
         }
-        return $result;
+        return $this->changes = $result;
     }
 
     public function getValue(string $key): mixed
@@ -173,6 +182,7 @@ final class State
 
     public function register(string $key, mixed $value): void
     {
+        $this->changes = null;
         $this->freeWaitingField($key);
         $this->data[$key] = $value;
     }

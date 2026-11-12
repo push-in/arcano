@@ -193,7 +193,15 @@ final class Node
      */
     public function syncState(RelationMap $relMap, State $state): array
     {
-        $changes = \array_udiff_assoc($state->getTransactionData(), $this->data, [self::class, 'compare']);
+        $changes = [];
+        foreach ($state->getTransactionData() as $field => $value) {
+            if (
+                !\array_key_exists($field, $this->data)
+                || ($value !== $this->data[$field] && self::compare($value, $this->data[$field]) !== 0)
+            ) {
+                $changes[$field] = $value;
+            }
+        }
 
         foreach ($state->getRelations() as $name => $value) {
             if (SpecialValue::isNotSet($value)) {

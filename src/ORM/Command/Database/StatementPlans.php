@@ -6,6 +6,7 @@ namespace Arcano\ORM\Command\Database;
 
 use Arcano\Database\Database;
 use Arcano\Database\DatabaseInterface;
+use Arcano\Database\Driver\SQLite\SQLiteDriver;
 use Arcano\Database\Injection\Parameter;
 use Arcano\Database\Query\InsertQuery;
 use Arcano\Database\Query\QueryParameters;
@@ -144,7 +145,7 @@ final class StatementPlans
             }
         }
         $query = $db->insert($table)->values($values);
-        if ($returning !== []) {
+        if ($returning !== [] && !self::isRowid($db, $table, $returning)) {
             if (!$query instanceof ReturningInterface) {
                 return false;
             }
@@ -155,6 +156,21 @@ final class StatementPlans
 
         $slots = self::findSlots($parameters->getParameters(), $sentinels);
         return $slots === null ? false : [$query, $sql, $parameters->getParameters(), $slots];
+    }
+
+    /**
+     * Whether `$returning` is the rowid alias of an SQLite table (a single INTEGER PRIMARY KEY):
+     * then the last insert id is the returned value and RETURNING, which costs a result set
+     * per row, is not needed.
+     */
+    private static function isRowid(Database $db, string $table, array $returning): bool
+    {
+        $driver = $db->getDriver();
+        if (!$driver instanceof SQLiteDriver || \count($returning) !== 1 || \str_contains($table, '.')) {
+            return false;
+        }
+
+        return $driver->isRowidAlias($db->getPrefix() . $table, $returning[0]);
     }
 
     /**

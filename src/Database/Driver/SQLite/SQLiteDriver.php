@@ -97,6 +97,35 @@ class SQLiteDriver extends Driver implements CursorInterface
         }
     }
 
+    /**
+     * Whether `$column` is the rowid alias of `$table` (its single INTEGER PRIMARY KEY), so the
+     * last insert id is the inserted key. Read from the schema without query logging.
+     *
+     * @internal
+     */
+    public function isRowidAlias(string $table, string $column): bool
+    {
+        try {
+            $pdo = $this->getPDO();
+            $statement = $pdo->prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?");
+            $statement->execute([$table]);
+            $definition = $statement->fetchColumn();
+            if (!\is_string($definition) || \preg_match('/without\s+rowid|primary\s+key\s+desc/i', $definition) === 1) {
+                return false;
+            }
+            $keys = [];
+            foreach ($pdo->query('PRAGMA table_info(' . $this->identifier($table) . ')')->fetchAll(\PDO::FETCH_ASSOC) as $info) {
+                (int) $info['pk'] > 0 and $keys[] = $info;
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return \count($keys) === 1
+            && $keys[0]['name'] === $column
+            && \strtoupper((string) $keys[0]['type']) === 'INTEGER';
+    }
+
     protected function mapException(\Throwable $exception, string $query): StatementException
     {
         if (\str_starts_with(self::getSqlState($exception) ?? '', '23')) {

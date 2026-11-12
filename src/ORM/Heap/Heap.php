@@ -112,6 +112,27 @@ final class Heap implements HeapInterface, \IteratorAggregate
         }
     }
 
+    /**
+     * The entity storage, for compiled loaders that attach many entities.
+     *
+     * @internal
+     */
+    public function loadedStorage(): \SplObjectStorage
+    {
+        return $this->storage;
+    }
+
+    /**
+     * The single-column indexes of a role (key => value => entity), by reference.
+     *
+     * @internal
+     */
+    public function &loadedIndex(string $role): array
+    {
+        $this->paths[$role] ??= [];
+        return $this->paths[$role];
+    }
+
     public function attach(object $entity, Node $node, array $index = []): void
     {
         $this->storage->offsetSet($entity, $node);

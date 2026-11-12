@@ -131,6 +131,31 @@ class ProxyEntityFactory
      */
     public function compileRowHydrator(RelationMap $relMap, string $sourceClass, array $fields): ?\Closure
     {
+        $plan = $this->rowPlan($relMap, $sourceClass, $fields);
+        if ($plan === null) {
+            return null;
+        }
+        [$prototype, $code, $scope] = $plan;
+
+        $hydrator = eval(
+            "declare(strict_types=1);\nreturn static function (array \$d, \\Arcano\\ORM\\Heap\\Node \$n) use (\$prototype): object {\n"
+            . "\$o = clone \$prototype;\n{$code}\$o->__arcano_node = \$n;\nreturn \$o;\n};"
+        );
+
+        return $scope === null ? $hydrator : \Closure::bind($hydrator, null, $scope);
+    }
+
+    /**
+     * The prepared proxy to clone, the code assigning the fields from `$d` to `$o`, and
+     * the class scope that code must run in (null for public fields). Null when a field
+     * is not a declared property of a single scope or the class can't be cloned.
+     *
+     * @param list<non-empty-string> $fields
+     *
+     * @return array{object, string, class-string|null}|null
+     */
+    public function rowPlan(RelationMap $relMap, string $sourceClass, array $fields): ?array
+    {
         $sample = $this->create($relMap, $sourceClass);
         $prototype = $this->prototypes[$sourceClass][\spl_object_id($relMap)] ?? null;
         if ($prototype === null) {
@@ -161,12 +186,7 @@ class ProxyEntityFactory
             $code .= "\$o->{$field} = \$d[{$key}];\n";
         }
 
-        $hydrator = eval(
-            "declare(strict_types=1);\nreturn static function (array \$d, \\Arcano\\ORM\\Heap\\Node \$n) use (\$prototype): object {\n"
-            . "\$o = clone \$prototype;\n{$code}\$o->__arcano_node = \$n;\nreturn \$o;\n};"
-        );
-
-        return $scope === null || $scope === '' ? $hydrator : \Closure::bind($hydrator, null, $scope);
+        return [$prototype, $code, $scope === '' ? null : $scope];
     }
 
     /**

@@ -150,7 +150,7 @@ final class EntityFactory implements EntityFactoryInterface
      * What the compiled makers need for a role and field list, or null when the role
      * needs the generic path (custom mapper or typecast, inheritance, composite key).
      *
-     * @return array{string, \Arcano\ORM\RelationMap, string, list<string>, array, \Closure}|null
+     * @return array{string, \Arcano\ORM\RelationMap, string, list<string>, array, array}|null
      */
     private function makerPlan(string $role, array $fields): ?array
     {
@@ -181,9 +181,9 @@ final class EntityFactory implements EntityFactoryInterface
             }
             $keys[] = $key;
         }
-        $hydrate = $mapper->compileRowHydrator($fields);
+        $rowPlan = $mapper->rowPlan($fields);
 
-        return $hydrate === null ? null : [$rRole, $relMap, $pk, $keys, $rules, $hydrate];
+        return $rowPlan === null ? null : [$rRole, $relMap, $pk, $keys, $rules, $rowPlan];
     }
 
     /**
@@ -204,7 +204,11 @@ final class EntityFactory implements EntityFactoryInterface
         if ($plan === null) {
             return null;
         }
-        [$rRole, $relMap, $pk, $keys, $rules, $hydrate] = $plan;
+        [$rRole, $relMap, $pk, $keys, $rules] = $plan;
+        $hydrate = $mapper->compileRowHydrator($fields);
+        if ($hydrate === null) {
+            return null;
+        }
 
         $items = [];
         foreach (\array_intersect_key($rules, \array_flip($fields)) as $field => $rule) {
@@ -249,7 +253,7 @@ final class EntityFactory implements EntityFactoryInterface
         if ($plan === null) {
             return null;
         }
-        [$rRole, $relMap, $pk, $keys, $rules, $hydrate] = $plan;
+        [$rRole, $relMap, $pk, $keys, $rules, [$prototype, $assign, $scope]] = $plan;
         $heap = $this->heap;
         $pkIndex = \array_search($pk, $columns, true);
 
@@ -258,57 +262,71 @@ final class EntityFactory implements EntityFactoryInterface
         foreach ($columns as $i => $field) {
             $key = \var_export($field, true);
             $items[] = isset($rules[$field])
-                ? "{$key} => \$r[{$i}] === null ? null : ({$rules[$field]}) \$r[{$i}]"
-                : "{$key} => \$r[{$i}]";
+                ? "{$key} => \$row[{$i}] === null ? null : ({$rules[$field]}) \$row[{$i}]"
+                : "{$key} => \$row[{$i}]";
         }
-        $build = eval("declare(strict_types=1);\nreturn static fn (array \$r): array => [" . \implode(', ', $items) . '];');
-        $deferRelations = $relMap->getRelations() !== [];
+        $build = \implode(', ', $items);
+        $index = '';
+        foreach ($keys as $key) {
+            $key = \var_export($key, true);
+            $index .= "isset(\$d[{$key}]) and \$index[{$key}][(string) \$d[{$key}]] = \$o;\n";
+        }
+        $pkKey = \var_export($pk, true);
+        $roleKey = \var_export($rRole, true);
+        $defer = $relMap->getRelations() !== [] ? "\$n->deferRelations(\$relMap);\n" : '';
+
+        // Entities from the heap or without a key take the generic path ($make).
+        $make = fn (array $row): object => $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
 
         // $fresh collects the ids of the entities created here (not taken from the heap),
         // $nodes the heap node of each result.
-        return function (iterable $rows, ?array &$fresh = null, ?array &$nodes = null) use (
-            $role, $rRole, $relMap, $pk, $pkIndex, $columns, $keys, $heap, $build, $hydrate, $deferRelations,
-        ): array {
-            $result = [];
-            $seen = [];
-            try {
-                foreach ($rows as $row) {
-                    $id = $row[$pkIndex];
-                    if ($id === null) {
-                        $result[] = $entity = $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
-                        $nodes === null or $nodes[] = $heap->get($entity);
-                        continue;
+        $maker = eval(<<<PHP
+            declare(strict_types=1);
+            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null) use (\$heap, \$make, \$prototype, \$relMap): array {
+                \$result = [];
+                \$seen = [];
+                \$storage = \$heap->loadedStorage();
+                \$index = &\$heap->loadedIndex({$roleKey});
+                try {
+                    foreach (\$rows as \$row) {
+                        \$id = \$row[{$pkIndex}];
+                        if (\$id === null) {
+                            \$result[] = \$o = \$make(\$row);
+                            \$nodes === null or \$nodes[] = \$heap->get(\$o);
+                            continue;
+                        }
+                        \$id = (string) \$id;
+                        // Same as the parser: one entity per primary key.
+                        if (isset(\$seen[\$id])) {
+                            continue;
+                        }
+                        \$seen[\$id] = true;
+                        if (isset(\$index[{$pkKey}][\$id])) {
+                            \$result[] = \$o = \$make(\$row);
+                            \$nodes === null or \$nodes[] = \$heap->get(\$o);
+                            continue;
+                        }
+                        \$d = [{$build}];
+                        \$n = new \\Arcano\\ORM\\Heap\\Node(\\Arcano\\ORM\\Heap\\Node::MANAGED, \$d, {$roleKey}, true);
+                        \$o = clone \$prototype;
+                        {$assign}\$o->__arcano_node = \$n;
+                        \$storage[\$o] = \$n;
+                        {$index}{$defer}\$fresh === null or \$fresh[\\spl_object_id(\$o)] = true;
+                        \$nodes === null or \$nodes[] = \$n;
+                        \$result[] = \$o;
                     }
-                    $id = (string) $id;
-                    // Same as the parser: one entity per primary key.
-                    if (isset($seen[$id])) {
-                        continue;
-                    }
-                    $seen[$id] = true;
-                    if ($heap->findKey($rRole, $pk, $id) !== null) {
-                        $result[] = $entity = $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
-                        $nodes === null or $nodes[] = $heap->get($entity);
-                        continue;
-                    }
-
-                    $data = $build($row);
-                    $node = new Node(Node::MANAGED, $data, $rRole, true);
-                    $entity = $hydrate($data, $node);
-                    $heap->attachLoaded($entity, $node, $rRole, $data, $keys);
-                    $deferRelations and $node->deferRelations($relMap);
-                    $fresh === null or $fresh[\spl_object_id($entity)] = true;
-                    $nodes === null or $nodes[] = $node;
-                    $result[] = $entity;
+                } catch (\\TypeError \$e) {
+                    throw new \\Arcano\\ORM\\Exception\\MapperException(
+                        "Can't hydrate an entity because property and value types are incompatible.",
+                        previous: \$e,
+                    );
                 }
-            } catch (\TypeError $e) {
-                throw new MapperException(
-                    "Can't hydrate an entity because property and value types are incompatible.",
-                    previous: $e,
-                );
-            }
 
-            return $result;
-        };
+                return \$result;
+            };
+            PHP);
+
+        return $scope === null ? $maker : \Closure::bind($maker, null, $scope);
     }
 
     /**

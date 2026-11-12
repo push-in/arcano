@@ -60,6 +60,18 @@ class Mapper extends DatabaseMapper
             : null;
     }
 
+    /**
+     * @internal
+     *
+     * @see ProxyEntityFactory::rowPlan()
+     */
+    public function rowPlan(array $fields): ?array
+    {
+        return $this->children === []
+            ? $this->entityFactory->rowPlan($this->relationMap, $this->entity, $fields)
+            : null;
+    }
+
     public function hydrate(object $entity, array $data): object
     {
         $this->entityFactory->upgrade($this->relationMap, $entity, $data);

@@ -13,7 +13,10 @@ use Arcano\ORM\Command\Special\Sequence;
 use Arcano\ORM\Exception\PoolException;
 use Arcano\ORM\Exception\SuccessTransactionRetryException;
 use Arcano\ORM\Exception\TransactionException;
+use Arcano\Database\DatabaseInterface;
+use Arcano\ORM\Heap\Heap;
 use Arcano\ORM\Heap\Node;
+use Arcano\ORM\Reference\ReferenceInterface;
 use Arcano\ORM\Options;
 use Arcano\ORM\ORMInterface;
 use Arcano\ORM\Relation\SpecialValue;
@@ -46,6 +49,7 @@ final class UnitOfWork implements StateInterface
      */
     private array $direct = [];
     private bool $directOpen = true;
+    private ?DirectInsert $directInsert = null;
 
     public function __construct(
         private ORMInterface $orm,
@@ -83,7 +87,11 @@ final class UnitOfWork implements StateInterface
     public function persistDeferred(object $entity, bool $cascade = true): self
     {
         $this->checkActionPossibility('schedule entity storing');
-        if ($this->directOpen && $entity instanceof EntityProxyInterface && \property_exists($entity, '__arcano_node')) {
+        if ($this->directOpen && (
+            $entity instanceof EntityProxyInterface
+                ? \property_exists($entity, '__arcano_node')
+                : !$entity instanceof ReferenceInterface
+        )) {
             $this->direct[\spl_object_id($entity)] = [$entity, $cascade];
             return $this;
         }
@@ -208,7 +216,21 @@ final class UnitOfWork implements StateInterface
         $heap = $this->orm->getHeap();
         $roles = [];
         $plan = [];
-        foreach ($this->direct as [$entity]) {
+        $claimed = [];
+        foreach ($this->direct as [$entity, $cascade]) {
+            if (!$entity instanceof EntityProxyInterface) {
+                // A new entity graph.
+                if (!$heap instanceof Heap) {
+                    return null;
+                }
+                $this->directInsert ??= new DirectInsert($this->orm, $heap);
+                $op = $this->directInsert->plan($entity, $cascade, $this->direct, $claimed);
+                if ($op === null) {
+                    return null;
+                }
+                $plan[] = [true, $op];
+                continue;
+            }
             $node = $entity->__arcano_node;
             if (
                 $node === null
@@ -248,7 +270,7 @@ final class UnitOfWork implements StateInterface
             if (\array_key_exists($pk, $changes) || !isset($before[$pk])) {
                 return null;
             }
-            $plan[] = [$entity, $node, $mapper, $changes, $before[$pk], $indexes, $source, $pk];
+            $plan[] = [false, [$entity, $node, $mapper, $changes, $before[$pk], $indexes, $source, $pk]];
         }
 
         return $plan;
@@ -288,14 +310,23 @@ final class UnitOfWork implements StateInterface
     private function runDirect(array $plan): StateInterface
     {
         $drivers = [];
+        $begin = static function (DatabaseInterface $db) use (&$drivers): void {
+            $driver = $db->getDriver();
+            if (!\in_array($driver, $drivers, true)) {
+                $driver->beginTransaction();
+                $drivers[] = $driver;
+            }
+        };
+        $results = [];
         try {
-            foreach ($plan as [, , $mapper, $changes, $id, , $source, $pk]) {
-                $db = $source->getDatabase();
-                $driver = $db->getDriver();
-                if (!\in_array($driver, $drivers, true)) {
-                    $driver->beginTransaction();
-                    $drivers[] = $driver;
+            foreach ($plan as $i => [$insert, $op]) {
+                if ($insert) {
+                    $results[$i] = $this->directInsert->execute($op, $begin);
+                    continue;
                 }
+                [, , $mapper, $changes, $id, , $source, $pk] = $op;
+                $db = $source->getDatabase();
+                $begin($db);
                 $values = $mapper->uncast($changes);
                 $values = $mapper->mapColumns($values);
                 $where = $mapper->uncast([$pk => $id]);
@@ -317,7 +348,12 @@ final class UnitOfWork implements StateInterface
         }
 
         $heap = $this->orm->getHeap();
-        foreach ($plan as [$entity, $node, , $changes, , $indexes]) {
+        foreach ($plan as $i => [$insert, $op]) {
+            if ($insert) {
+                $this->directInsert->sync($op, $results[$i]);
+                continue;
+            }
+            [$entity, $node, , $changes, , $indexes] = $op;
             $before = $node->getData();
             $reindex = $this->indexChanged($indexes, $before, $changes + $before);
             $reindex and $heap->detach($entity);
@@ -328,7 +364,7 @@ final class UnitOfWork implements StateInterface
         $this->direct = [];
         $this->error = null;
         $this->stage = self::STAGE_FINISHED;
-        unset($this->orm, $this->runner, $this->pool, $this->commandGenerator);
+        unset($this->orm, $this->runner, $this->pool, $this->commandGenerator, $this->directInsert);
 
         return $this;
     }

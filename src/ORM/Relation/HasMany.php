@@ -136,6 +136,21 @@ class HasMany extends AbstractRelation
     }
 
     /**
+     * Inner keys, outer keys and the relation name set on each child, for the direct
+     * insert of new graphs, or null when the relation has an inversion.
+     *
+     * @internal
+     *
+     * @return array{list<string>, list<string>, string}|null
+     */
+    public function directInsertKeys(): ?array
+    {
+        return $this->inversion === null
+            ? [$this->innerKeys, $this->outerKeys, $this->getTargetRelationName()]
+            : null;
+    }
+
+    /**
      * Init relation state and entity collection.
      */
     public function init(EntityFactoryInterface $factory, Node $node, array $data): iterable

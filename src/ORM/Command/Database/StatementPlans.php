@@ -76,14 +76,26 @@ final class StatementPlans
         return $driver->execute($sql, $parameters);
     }
 
+    /** @var \WeakMap<DatabaseInterface, bool>|null Whether the insert queries of a database support RETURNING. */
+    private static ?\WeakMap $returning = null;
+
     /**
-     * Runs the insert built as `$insert` (values `$values`, returning `$returning`) through
-     * a cached statement and returns its result as {@see InsertQuery::run()} does, or null
-     * in the first slot when the values need the query builder.
+     * Whether `$db->insert()` builds queries with RETURNING support (it depends on the driver only).
+     */
+    public static function returns(DatabaseInterface $db, string $table): bool
+    {
+        self::$returning ??= new \WeakMap();
+        return self::$returning[$db] ??= $db->insert($table) instanceof ReturningInterface;
+    }
+
+    /**
+     * Runs `INSERT INTO table values RETURNING returning` through a cached statement and
+     * returns its result as {@see InsertQuery::run()} does, or false in the first slot when
+     * the values need the query builder.
      *
      * @return array{bool, mixed}
      */
-    public static function insert(DatabaseInterface $db, string $table, InsertQuery $insert, array $values, array $returning): array
+    public static function insert(DatabaseInterface $db, string $table, array $values, array $returning): array
     {
         if (!$db instanceof Database) {
             return [false, null];
@@ -115,12 +127,12 @@ final class StatementPlans
             return [false, null];
         }
 
-        [$sql, $parameters, $slots] = $plan;
+        [$query, $sql, $parameters, $slots] = $plan;
         foreach ($slots as $i => $index) {
             $parameters[$index] = new Parameter($args[$i]);
         }
 
-        return [true, $insert->runStatement($sql, $parameters)];
+        return [true, $query->runStatement($sql, $parameters)];
     }
 
     private static function compileInsert(Database $db, string $table, array $values, array $returning): array|false
@@ -142,7 +154,7 @@ final class StatementPlans
         $sql = $query->sqlStatement($parameters);
 
         $slots = self::findSlots($parameters->getParameters(), $sentinels);
-        return $slots === null ? false : [$sql, $parameters->getParameters(), $slots];
+        return $slots === null ? false : [$query, $sql, $parameters->getParameters(), $slots];
     }
 
     /**

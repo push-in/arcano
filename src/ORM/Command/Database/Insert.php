@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Arcano\ORM\Command\Database;
 
+use Arcano\Database\Database;
 use Arcano\Database\DatabaseInterface;
 use Arcano\Database\Query\InsertQuery;
 use Arcano\Database\Query\ReturningInterface;
@@ -100,25 +101,22 @@ final class Insert extends StoreCommand
         $uncasted = $this->prepareData($uncasted);
 
         $values = \array_merge($this->columns, $uncasted);
-        $insert = $this->db
-            ->insert($this->table)
-            ->values($values);
 
         if ($this->pkColumn !== null && $returningFields === []) {
             $returningFields[$this->primaryKeys[0]] ??= $this->pkColumn;
         }
 
+        // Cached statements need the concrete database; other implementations get the builder.
+        $insert = $this->db instanceof Database ? null : $this->db->insert($this->table)->values($values);
         $returning = [];
-        if ($insert instanceof ReturningInterface && $returningFields !== []) {
+        if ($returningFields !== [] && ($insert === null
+            ? StatementPlans::returns($this->db, $this->table)
+            : $insert instanceof ReturningInterface)) {
             // Map generated fields to columns. Fields that are not declared in the schema columns
             // are dropped from $returningFields by reference, so both arrays stay aligned.
             $columns = $this->mapper->mapColumns($returningFields);
             // Array of [field name => column name]
             $returning = \array_combine(\array_keys($returningFields), \array_keys($columns));
-
-            if ($returning !== []) {
-                $insert->returning(...\array_values($returning));
-            }
         }
 
         if ($returning !== []) {
@@ -154,11 +152,18 @@ final class Insert extends StoreCommand
         parent::execute();
     }
 
-    private function runInsert(InsertQuery $insert, array $values, array $returning): mixed
+    private function runInsert(?InsertQuery $insert, array $values, array $returning): mixed
     {
-        [$done, $result] = StatementPlans::insert($this->db, $this->table, $insert, $values, $returning);
+        if ($insert === null) {
+            [$done, $result] = StatementPlans::insert($this->db, $this->table, $values, $returning);
+            if ($done) {
+                return $result;
+            }
+            $insert = $this->db->insert($this->table)->values($values);
+        }
+        $returning === [] or $insert->returning(...$returning);
 
-        return $done ? $result : $insert->run();
+        return $insert->run();
     }
 
     public function register(string $key, mixed $value): void

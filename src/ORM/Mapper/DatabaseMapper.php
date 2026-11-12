@@ -135,6 +135,23 @@ abstract class DatabaseMapper implements MapperInterface
         return $this->typecast->uncast($data);
     }
 
+    /**
+     * Primary keys, the single primary column and the generated fields, as {@see queueCreate()}
+     * hands them to the insert command.
+     *
+     * @internal
+     *
+     * @return array{list<string>, string|null, array<string, int>}
+     */
+    public function insertKeys(): array
+    {
+        return [
+            $this->primaryKeys,
+            \count($this->primaryColumns) === 1 ? $this->primaryColumns[0] : null,
+            $this->generatedFields,
+        ];
+    }
+
     public function queueCreate(object $entity, Node $node, State $state): CommandInterface
     {
         $values = $state->getData();

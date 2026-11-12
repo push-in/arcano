@@ -112,14 +112,6 @@ final class EmbeddedLoader implements JoinableInterface
     }
 
     /**
-     * Destruct loader.
-     */
-    public function __destruct()
-    {
-        unset($this->parent);
-    }
-
-    /**
      * Define schema option associated with the entity.
      *
      * @return mixed

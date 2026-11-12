@@ -213,14 +213,6 @@ final class Node
         return $changes;
     }
 
-    /**
-     * Reset state.
-     */
-    public function __destruct()
-    {
-        unset($this->data, $this->rawData, $this->state, $this->relations);
-    }
-
     private function updateRawData(): void
     {
         $this->rawData = [];

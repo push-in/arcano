@@ -1034,14 +1034,6 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     }
 
     /**
-     * Remove nested loaders and clean ORM link.
-     */
-    public function __destruct()
-    {
-        unset($this->loader, $this->builder);
-    }
-
-    /**
      * @param bool $addRole If true, the role name with the key `@role` will be added to the result set.
      * @return array<array-key, array<non-empty-string, mixed>>
      */

@@ -168,11 +168,6 @@ final class Heap implements HeapInterface, \IteratorAggregate
         $this->storage = clone $this->storage;
     }
 
-    public function __destruct()
-    {
-        $this->clean();
-    }
-
     private function eraseIndexes(string $role, array $data, object $entity): void
     {
         if (!isset($this->paths[$role]) || empty($data)) {

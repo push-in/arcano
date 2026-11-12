@@ -253,14 +253,6 @@ abstract class AbstractNode
         }
     }
 
-    public function __destruct()
-    {
-        $this->parent = null;
-        $this->nodes = [];
-        unset($this->indexedData);
-        $this->duplicates = [];
-    }
-
     /**
      * Mount record data into internal data storage under specified container using reference key
      * (inner key) and reference criteria (outer key value).

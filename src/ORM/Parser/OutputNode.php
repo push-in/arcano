@@ -24,15 +24,6 @@ abstract class OutputNode extends AbstractNode
         return $this->result;
     }
 
-    /**
-     * Destructing.
-     */
-    public function __destruct()
-    {
-        $this->result = [];
-        parent::__destruct();
-    }
-
     protected function push(array &$data): void
     {
         $this->result[] = &$data;

@@ -331,11 +331,6 @@ abstract class AbstractLoader implements LoaderInterface
         }
     }
 
-    final public function __destruct()
-    {
-        unset($this->parent, $this->inherit, $this->subclasses, $this->load, $this->join);
-    }
-
     protected function loadChild(AbstractNode $node, bool $includeRole = false): void
     {
         foreach ($this->load as $relation => $loader) {

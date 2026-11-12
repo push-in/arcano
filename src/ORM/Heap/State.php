@@ -198,9 +198,4 @@ final class State
     {
         return $this->relationStatus[$name] ?? RelationInterface::STATUS_PREPARE;
     }
-
-    public function __destruct()
-    {
-        unset($this->relations, $this->storage, $this->data, $this->transactionData);
-    }
 }

@@ -56,6 +56,28 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     private EntityFactoryInterface $entityFactory;
 
     /**
+     * While nothing but simple where/orderBy/limit/offset calls reached this select, they
+     * are recorded instead of applied and the loader and builder are unset; {@see __get()}
+     * applies them on the first access. The shape key identifies the query without its
+     * values, so fetchAll() can run a cached statement.
+     *
+     * @var list<array{string, array, int|null}>
+     */
+    private array $recorded = [];
+    private string $shape = '';
+    /** @var list<scalar> */
+    private array $shapeValues = [];
+    /** @var array{RootLoader, QueryBuilder}|null */
+    private ?array $deferred = null;
+    /** Shape plans shared by the clones of one select. */
+    private \ArrayObject $shapes;
+
+    private const RECORDABLE_OPERATORS = [
+        '=' => true, '!=' => true, '<>' => true, '>' => true, '<' => true, '>=' => true, '<=' => true,
+        'like' => true, 'not like' => true,
+    ];
+
+    /**
      * @param class-string<TEntity>|string $role
      */
     public function __construct(
@@ -67,6 +89,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $this->mapperProvider = $orm->getService(MapperProviderInterface::class);
         $this->entityFactory = $orm->getService(EntityFactoryInterface::class);
         $this->allowGroupBy = $orm->getService(Options::class)->groupByToDeduplicate;
+        $this->shapes = new \ArrayObject();
         $this->loader = new RootLoader(
             $orm->getSchema(),
             $orm->getService(SourceProviderInterface::class),
@@ -243,6 +266,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function where(mixed ...$args): static
     {
+        if (!$this->customized && $this->record('where', $args)) {
+            return $this;
+        }
         $this->customized = true;
         $this->builder->where(...$args);
         return $this;
@@ -369,6 +395,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orderBy(string|FragmentInterface|array $expression, ?string $direction = 'ASC'): static
     {
+        if (!$this->customized && $this->record('orderBy', [$expression, $direction])) {
+            return $this;
+        }
         $this->customized = true;
         $this->builder->orderBy($expression, $direction);
         return $this;
@@ -652,8 +681,11 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function limit(int $limit): self
     {
-        $this->customized = true;
         $this->limit = $limit;
+        if (!$this->customized && $this->record('limit', [$limit])) {
+            return $this;
+        }
+        $this->customized = true;
         $this->loader->getQuery()->limit($limit);
 
         return $this;
@@ -664,8 +696,11 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function offset(int $offset): self
     {
-        $this->customized = true;
         $this->offset = $offset;
+        if (!$this->customized && $this->record('offset', [$offset])) {
+            return $this;
+        }
+        $this->customized = true;
         $this->loader->getQuery()->offset($offset);
 
         return $this;
@@ -878,6 +913,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $role = $this->loader->getTarget();
         if (
             $this->customized
+            || $this->shape !== ''
             || $this->loader->hasChildren()
             || \count($this->loader->getPrimaryFields()) !== 1
             || $this->schema->define($role, SchemaInterface::SCOPE) !== null
@@ -954,6 +990,24 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function fetchAll(): iterable
     {
+        if (!$this->customized) {
+            $plan = $this->shapes[$this->shape] ?? null;
+            if ($plan === null && \count($this->shapes) < 1024) {
+                $plan = $this->shapes[$this->shape] = $this->shapePlan();
+            }
+            if ($plan) {
+                [$driver, $sql, $values, $slots, $maker] = $plan;
+                foreach ($slots as $i => $index) {
+                    $values[$index] = new Parameter($this->shapeValues[$i]);
+                }
+                $statement = $driver->query($sql, $values);
+                $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+                $statement->close();
+
+                return $maker($rows);
+            }
+        }
+
         $maker = $this->rowMaker();
         if ($maker === null) {
             return \iterator_to_array($this->getIterator(), false);
@@ -964,6 +1018,126 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $statement->close();
 
         return $maker($rows);
+    }
+
+    /**
+     * @internal Applies the recorded calls when the loader or the builder is first read.
+     */
+    public function __get(string $name): mixed
+    {
+        if ($this->deferred !== null && ($name === 'loader' || $name === 'builder')) {
+            $this->applyRecorded();
+            return $this->$name;
+        }
+
+        \trigger_error(\sprintf('Undefined property: %s::$%s', static::class, $name), \E_USER_WARNING);
+        return null;
+    }
+
+    /**
+     * Records a simple call instead of applying it. False when the call has another form.
+     */
+    private function record(string $method, array $args): bool
+    {
+        $value = null;
+        switch ($method) {
+            case 'where':
+                $count = \count($args);
+                if (!\array_is_list($args) || ($count !== 2 && $count !== 3)) {
+                    return false;
+                }
+                $value = $args[$count - 1];
+                $operator = $count === 3 ? $args[1] : '=';
+                if (
+                    !\is_string($args[0])
+                    || !\is_string($operator)
+                    || !isset(self::RECORDABLE_OPERATORS[\strtolower($operator)])
+                    || !\is_scalar($value)
+                ) {
+                    return false;
+                }
+                $this->shape .= "w{$count}\0{$args[0]}\0{$operator}\1";
+                break;
+            case 'orderBy':
+                if (!\is_string($args[0]) || ($args[1] !== null && !\is_string($args[1]))) {
+                    return false;
+                }
+                $this->shape .= "o\0{$args[0]}\0" . ($args[1] ?? "\2") . "\1";
+                break;
+            default: // limit, offset
+                $this->shape .= "{$method}\0{$args[0]}\1";
+        }
+
+        if ($this->deferred === null) {
+            $this->deferred = [$this->loader, $this->builder];
+            unset($this->loader, $this->builder);
+        }
+        if ($value !== null) {
+            $this->shapeValues[] = $value;
+        }
+        $this->recorded[] = [$method, $args, $value === null ? null : \count($this->shapeValues) - 1];
+
+        return true;
+    }
+
+    private function applyRecorded(): void
+    {
+        $this->customized = true;
+        if ($this->deferred === null) {
+            return;
+        }
+        [$this->loader, $this->builder] = $this->deferred;
+        $this->deferred = null;
+        foreach ($this->recorded as [$method, $args, $slot]) {
+            if ($slot !== null) {
+                $args[\array_key_last($args)] = $this->shapeValues[$slot];
+            }
+            match ($method) {
+                'where' => $this->builder->where(...$args),
+                'orderBy' => $this->builder->orderBy(...$args),
+                'limit' => $this->loader->getQuery()->limit($args[0]),
+                'offset' => $this->loader->getQuery()->offset($args[0]),
+            };
+        }
+        $this->recorded = [];
+    }
+
+    /**
+     * Compiles the recorded shape once with sentinel values and finds where each
+     * value lands in the statement parameters. False when the shape can't be cached.
+     */
+    private function shapePlan(): array|false
+    {
+        $copy = clone $this;
+        $sentinels = [];
+        foreach ($copy->shapeValues as $i => $_) {
+            $sentinels["\0arcano-value-{$i}\0"] = $i;
+        }
+        $copy->shapeValues = \array_keys($sentinels);
+        $copy->applyRecorded();
+
+        $maker = $copy->rowMaker();
+        if ($maker === null) {
+            return false;
+        }
+        $query = $copy->addGroupByPK()->loader->buildQuery();
+        $parameters = new QueryParameters();
+        $sql = $query->sqlStatement($parameters);
+        $values = $parameters->getParameters();
+        $slots = [];
+        foreach ($values as $index => $value) {
+            $raw = $value instanceof ParameterInterface ? $value->getValue() : $value;
+            if (!\is_string($raw) || !\str_contains($raw, "\0arcano-value-")) {
+                continue;
+            }
+            $slot = $sentinels[$raw] ?? null;
+            if ($slot === null || isset($slots[$slot]) || !$value instanceof Parameter) {
+                return false;
+            }
+            $slots[$slot] = $index;
+        }
+
+        return \count($slots) === \count($sentinels) ? [$query->getDriver(), $sql, $values, $slots, $maker] : false;
     }
 
     /**
@@ -1154,6 +1328,12 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function __clone()
     {
+        if ($this->deferred !== null) {
+            // Still recording: the clone records on its own copies.
+            $loader = clone $this->deferred[0];
+            $this->deferred = [$loader, new QueryBuilder($loader->getQuery(), $loader)];
+            return;
+        }
         $this->loader = clone $this->loader;
         $this->builder = new QueryBuilder($this->loader->getQuery(), $this->loader);
     }

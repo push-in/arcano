@@ -36,3 +36,9 @@ about 3 µs per query. Cycle spends ~3 µs per row and ~10-25 µs per query.
   untouched entities.
 - Prepared statement per (table, column set), no query object per row.
 - Batch inserts where the driver can return keys (SQLite/Postgres RETURNING).
+
+## Eloquent too
+David wants Arcano 5x faster than Eloquent as well (`../bench-eloquent`,
+Eloquent 12.72; `../compare.sh` prints both). Target per scenario =
+min(Cycle, Eloquent) / 5. Exception: select_all, where Eloquent (2.4 ms) / 5
+is below the PDO floor (0.8 ms); there the goal is the floor itself (~3x).

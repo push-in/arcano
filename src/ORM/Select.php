@@ -67,7 +67,12 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     private string $shape = '';
     /** @var list<scalar> */
     private array $shapeValues = [];
-    /** @var array{RootLoader, QueryBuilder}|null */
+    /**
+     * The unset loader and builder. A null builder means the loader is shared with
+     * other selects and is cloned before first use.
+     *
+     * @var array{RootLoader, QueryBuilder|null}|null
+     */
     private ?array $deferred = null;
     /** Shape plans shared by the clones of one select. */
     private \ArrayObject $shapes;
@@ -1080,13 +1085,33 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         return true;
     }
 
+    /**
+     * Lets clones share the loader until one of them uses it.
+     *
+     * @internal
+     */
+    public function share(): void
+    {
+        if ($this->deferred === null) {
+            $this->deferred = [$this->loader, null];
+            unset($this->loader, $this->builder);
+        } elseif ($this->recorded === [] && $this->deferred[1] !== null) {
+            $this->deferred[1] = null;
+        }
+    }
+
     private function applyRecorded(): void
     {
-        $this->customized = true;
+        $this->recorded === [] or $this->customized = true;
         if ($this->deferred === null) {
             return;
         }
-        [$this->loader, $this->builder] = $this->deferred;
+        [$loader, $builder] = $this->deferred;
+        if ($builder === null) {
+            $loader = clone $loader;
+            $builder = new QueryBuilder($loader->getQuery(), $loader);
+        }
+        [$this->loader, $this->builder] = [$loader, $builder];
         $this->deferred = null;
         foreach ($this->recorded as [$method, $args, $slot]) {
             if ($slot !== null) {
@@ -1329,9 +1354,11 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     public function __clone()
     {
         if ($this->deferred !== null) {
-            // Still recording: the clone records on its own copies.
-            $loader = clone $this->deferred[0];
-            $this->deferred = [$loader, new QueryBuilder($loader->getQuery(), $loader)];
+            // Still unset: a shared loader stays shared, an owned one is copied.
+            if ($this->deferred[1] !== null) {
+                $loader = clone $this->deferred[0];
+                $this->deferred = [$loader, new QueryBuilder($loader->getQuery(), $loader)];
+            }
             return;
         }
         $this->loader = clone $this->loader;

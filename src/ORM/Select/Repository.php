@@ -58,6 +58,8 @@ class Repository implements RepositoryInterface
      */
     public function select(): Select
     {
+        // Clones share the loader of this select until they use it.
+        $this->select->share();
         return clone $this->select;
     }
 

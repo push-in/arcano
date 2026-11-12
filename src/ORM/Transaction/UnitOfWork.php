@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Arcano\ORM\Transaction;
 
 use Arcano\ORM\Command\CommandInterface;
+use Arcano\ORM\Command\Database\StatementPlans;
+use Arcano\ORM\EntityProxyInterface;
+use Arcano\ORM\Mapper\Mapper;
+use Arcano\ORM\SchemaInterface;
 use Arcano\ORM\Command\Special\Sequence;
 use Arcano\ORM\Exception\PoolException;
 use Arcano\ORM\Exception\SuccessTransactionRetryException;
@@ -34,6 +38,15 @@ final class UnitOfWork implements StateInterface
     private ?\Throwable $error = null;
     private bool $ignoreUninitializedRelations;
 
+    /**
+     * Managed entities stored while nothing else was scheduled. When none of them has
+     * touched relations, {@see runDirect()} updates them without the pool.
+     *
+     * @var array<int, array{object, bool}>
+     */
+    private array $direct = [];
+    private bool $directOpen = true;
+
     public function __construct(
         private ORMInterface $orm,
         private ?RunnerInterface $runner = null,
@@ -61,6 +74,7 @@ final class UnitOfWork implements StateInterface
     public function persistState(object $entity, bool $cascade = true): self
     {
         $this->checkActionPossibility('persist entity');
+        $this->flushDirect();
         $this->pool->attachStore($entity, $cascade, persist: true);
 
         return $this;
@@ -69,6 +83,11 @@ final class UnitOfWork implements StateInterface
     public function persistDeferred(object $entity, bool $cascade = true): self
     {
         $this->checkActionPossibility('schedule entity storing');
+        if ($this->directOpen && $entity instanceof EntityProxyInterface && \property_exists($entity, '__arcano_node')) {
+            $this->direct[\spl_object_id($entity)] = [$entity, $cascade];
+            return $this;
+        }
+        $this->flushDirect();
         $this->pool->attachStore($entity, $cascade);
 
         return $this;
@@ -77,6 +96,7 @@ final class UnitOfWork implements StateInterface
     public function delete(object $entity, bool $cascade = true): self
     {
         $this->checkActionPossibility('schedule entity deletion');
+        $this->flushDirect();
         $this->pool->attach($entity, Tuple::TASK_FORCE_DELETE, $cascade);
 
         return $this;
@@ -91,6 +111,14 @@ final class UnitOfWork implements StateInterface
             self::STAGE_PROCESS => throw new TransactionException('Can\'t run started transaction.'),
             default => self::STAGE_PROCESS,
         };
+
+        if ($this->direct !== []) {
+            $plan = $this->runner === null ? $this->directPlan() : null;
+            if ($plan !== null) {
+                return $this->runDirect($plan);
+            }
+            $this->flushDirect();
+        }
 
         $this->runner ??= Runner::innerTransaction();
 
@@ -146,7 +174,7 @@ final class UnitOfWork implements StateInterface
      */
     public function hasPendingChanges(): bool
     {
-        return isset($this->pool) && $this->pool->count() > 0;
+        return isset($this->pool) && ($this->direct !== [] || $this->pool->count() > 0);
     }
 
     /**
@@ -156,6 +184,153 @@ final class UnitOfWork implements StateInterface
     {
         $this->stage === self::STAGE_PROCESS && throw new TransactionException("Can't $action. Transaction began.");
         $this->stage === self::STAGE_FINISHED && throw new TransactionException("Can't $action. Transaction finished.");
+    }
+
+    private function flushDirect(): void
+    {
+        $this->directOpen = false;
+        foreach ($this->direct as [$entity, $cascade]) {
+            $this->pool->attachStore($entity, $cascade);
+        }
+        $this->direct = [];
+    }
+
+    /**
+     * Field changes of the directly stored entities, or null when any of them needs the pool.
+     *
+     * @return list<array{object, Node, Mapper, array, mixed, array, \Arcano\ORM\Select\SourceInterface, string}>|null
+     */
+    private function directPlan(): ?array
+    {
+        if ($this->commandGenerator::class !== CommandGenerator::class) {
+            return null;
+        }
+        $heap = $this->orm->getHeap();
+        $roles = [];
+        $plan = [];
+        foreach ($this->direct as [$entity]) {
+            $node = $entity->__arcano_node;
+            if (
+                $node === null
+                || $entity->__arcano_read !== []
+                || $entity->__cycle_orm_rel_data !== []
+                || $node->hasState()
+                || $node->getStatus() !== Node::MANAGED
+                || $heap->get($entity) !== $node
+                || !$node->relationsUntouched()
+            ) {
+                return null;
+            }
+            $role = $node->getRole();
+            $describe = $roles[$role] ??= $this->describeDirect($role);
+            if ($describe === null) {
+                return null;
+            }
+            [$mapper, $pk, $indexes, $source] = $describe;
+
+            // Same comparison as State::getChanges() over the node data.
+            $before = $node->getData();
+            $raw = $node->getRawData();
+            $changes = [];
+            foreach ($mapper->fetchFields($entity) as $field => $value) {
+                if (!\array_key_exists($field, $before)) {
+                    $changes[$field] = $value;
+                    continue;
+                }
+                $old = \array_key_exists($field, $raw) ? $raw[$field] : $before[$field];
+                if ($value !== $old && Node::compare($value, $old) !== 0) {
+                    $changes[$field] = $value;
+                }
+            }
+            if ($changes === []) {
+                continue;
+            }
+            if (\array_key_exists($pk, $changes) || !isset($before[$pk])) {
+                return null;
+            }
+            $plan[] = [$entity, $node, $mapper, $changes, $before[$pk], $indexes, $source, $pk];
+        }
+
+        return $plan;
+    }
+
+    /**
+     * @return array{Mapper, string, array, \Arcano\ORM\Select\SourceInterface}|null
+     */
+    private function describeDirect(string $role): ?array
+    {
+        $schema = $this->orm->getSchema();
+        $mapper = $this->orm->getMapper($role);
+        $pk = $schema->define($role, SchemaInterface::PRIMARY_KEY);
+        $map = $this->orm->getRelationMap($role);
+        if (
+            $mapper::class !== Mapper::class
+            || !\is_string($pk)
+            || $schema->define($role, SchemaInterface::PARENT) !== null
+            || ($schema->define($role, SchemaInterface::CHILDREN) ?? []) !== []
+            || $map->hasDependencies()
+            || $map->hasEmbedded()
+        ) {
+            return null;
+        }
+
+        return [
+            $mapper,
+            $pk,
+            $this->orm->getService(IndexProviderInterface::class)->getIndexes($role),
+            $this->orm->getSource($role),
+        ];
+    }
+
+    /**
+     * Runs the planned updates in one transaction per driver, then syncs the nodes.
+     */
+    private function runDirect(array $plan): StateInterface
+    {
+        $drivers = [];
+        try {
+            foreach ($plan as [, , $mapper, $changes, $id, , $source, $pk]) {
+                $db = $source->getDatabase();
+                $driver = $db->getDriver();
+                if (!\in_array($driver, $drivers, true)) {
+                    $driver->beginTransaction();
+                    $drivers[] = $driver;
+                }
+                $values = $mapper->uncast($changes);
+                $values = $mapper->mapColumns($values);
+                $where = $mapper->uncast([$pk => $id]);
+                $where = $mapper->mapColumns($where);
+                StatementPlans::update($db, $source->getTable(), $values, $where)
+                    ?? $db->update($source->getTable(), $values, $where)->run();
+            }
+            foreach (\array_reverse($drivers) as $driver) {
+                $driver->commitTransaction();
+            }
+        } catch (\Throwable $e) {
+            foreach (\array_reverse($drivers) as $driver) {
+                $driver->rollbackTransaction();
+            }
+            $this->error = $e;
+            $this->stage = self::STAGE_PREPARING;
+
+            return $this;
+        }
+
+        $heap = $this->orm->getHeap();
+        foreach ($plan as [$entity, $node, , $changes, , $indexes]) {
+            $before = $node->getData();
+            $reindex = $this->indexChanged($indexes, $before, $changes + $before);
+            $reindex and $heap->detach($entity);
+            $node->mergeData($changes);
+            $reindex and $heap->attach($entity, $node, $indexes);
+        }
+
+        $this->direct = [];
+        $this->error = null;
+        $this->stage = self::STAGE_FINISHED;
+        unset($this->orm, $this->runner, $this->pool, $this->commandGenerator);
+
+        return $this;
     }
 
     private function runCommand(?CommandInterface $command): void
@@ -175,19 +350,24 @@ final class UnitOfWork implements StateInterface
         $heap = $this->orm->getHeap();
         $relationProvider = $this->orm->getService(RelationProviderInterface::class);
         $indexProvider = $this->orm->getService(IndexProviderInterface::class);
+        $indexes = [];
         foreach ($this->pool->getAllTuples() as $e => $tuple) {
             $node = $tuple->node;
 
             // marked as being deleted and has no external claims (GC like approach)
-            if (\in_array($node->getStatus(), [Node::DELETED, Node::SCHEDULED_DELETE], true)) {
+            $status = $node->getStatus();
+            if ($status === Node::DELETED || $status === Node::SCHEDULED_DELETE) {
                 $heap->detach($e);
                 continue;
             }
             $role = $node->getRole();
 
-            // reindex the entity while it has old data
+            // reindex the entity while it has old data, unless no indexed value changed
             $node->setState($tuple->state);
-            $heap->attach($e, $node, $indexProvider->getIndexes($role));
+            $roleIndexes = $indexes[$role] ??= $indexProvider->getIndexes($role);
+            if (!$heap->has($e) || $this->indexChanged($roleIndexes, $node->getData(), $tuple->state->getData())) {
+                $heap->attach($e, $node, $roleIndexes);
+            }
 
             if ($tuple->persist !== null) {
                 $syncData = \array_udiff_assoc(
@@ -201,6 +381,21 @@ final class UnitOfWork implements StateInterface
 
             $tuple->mapper->hydrate($e, $syncData);
         }
+    }
+
+    private function indexChanged(array $indexes, array $before, array $after): bool
+    {
+        foreach ($indexes as $index) {
+            foreach ((array) $index as $key) {
+                $old = $before[$key] ?? null;
+                $new = $after[$key] ?? null;
+                if ($old !== $new && ($old === null || $new === null || (string) $old !== (string) $new)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -21,6 +21,9 @@ class Repository implements RepositoryInterface
      *
      * @param Select<TEntity> $select
      */
+    /** Compiled findByPK() statement; false when the select can't use one. */
+    private array|false|null $primaryKeyPlan = null;
+
     public function __construct(
         /** @readonly */
         protected Select $select,

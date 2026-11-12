@@ -504,6 +504,8 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
 
             return new Statement($statement);
         } catch (\Throwable $e) {
+            // A failed statement can't be reused: SQLite reports API misuse on the next bind.
+            unset($this->queryCache[$query]);
             $e = $this->mapException($e, Interpolator::interpolate($query, $parameters));
 
             if (

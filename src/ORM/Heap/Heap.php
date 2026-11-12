@@ -205,6 +205,8 @@ final class Heap implements HeapInterface, \IteratorAggregate
                 continue;
             }
             $keys = \explode(self::INDEX_KEY_SEPARATOR, $index);
+            // per index: the key to remove must not leak from the previous one
+            $removeKey = null;
             $j = \count($keys) - 1;
             $next = &$values;
             $removeFrom = &$next;

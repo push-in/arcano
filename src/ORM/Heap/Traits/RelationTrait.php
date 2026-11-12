@@ -63,6 +63,29 @@ trait RelationTrait
      *
      * @internal
      */
+    /**
+     * Whether every relation is still the unloaded reference the node created.
+     *
+     * @internal
+     */
+    public function relationsUntouched(): bool
+    {
+        if ($this->deferredRelations !== null) {
+            return $this->relations === [];
+        }
+        foreach ($this->relations as $name => $value) {
+            if (
+                !$value instanceof \Arcano\ORM\Reference\ReferenceInterface
+                || $value->hasValue()
+                || ($this->deferredReferences[$name] ?? null) !== $value
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public function getDeferredReference(string $name): mixed
     {
         $this->deferredRelations === null or $this->initDeferredRelations();

@@ -189,6 +189,33 @@ final class Node
     }
 
     /**
+     * Solid copies of the object values.
+     *
+     * @internal
+     */
+    public function getRawData(): array
+    {
+        return $this->rawData;
+    }
+
+    /**
+     * Applies stored field values without a state.
+     *
+     * @internal
+     */
+    public function mergeData(array $changes): void
+    {
+        foreach ($changes as $field => $value) {
+            $this->data[$field] = $value;
+            if (\is_object($value)) {
+                $this->rawData[$field] = self::convertToSolid($value);
+            } else {
+                unset($this->rawData[$field]);
+            }
+        }
+    }
+
+    /**
      * Sync the point state and return data diff.
      */
     public function syncState(RelationMap $relMap, State $state): array

@@ -43,6 +43,8 @@ abstract class BaseTest extends TestCase
     {
         $this->disableProfiling();
         $this->dropDatabase($this->database);
+        // Drivers created by single tests close their connections once collected.
+        \gc_collect_cycles();
     }
 
     protected function db(

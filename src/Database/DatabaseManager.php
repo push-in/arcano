@@ -36,6 +36,9 @@ final class DatabaseManager implements DatabaseProviderInterface, LoggerAwareInt
     /** @var DriverInterface[] */
     private array $drivers = [];
 
+    /** @var array<string, true> Drivers created from the config, closed with the manager. */
+    private array $ownDrivers = [];
+
     private ?LoggerInterface $logger = null;
 
     public function __construct(
@@ -159,6 +162,7 @@ final class DatabaseManager implements DatabaseProviderInterface, LoggerAwareInt
 
         $driverObject = $this->config->getDriver($driver);
         $this->drivers[$driver] = $driverObject;
+        $this->ownDrivers[$driver] = true;
 
         if ($driverObject instanceof LoggerAwareInterface) {
             $logger = $this->getLoggerForDriver($driverObject);
@@ -184,6 +188,17 @@ final class DatabaseManager implements DatabaseProviderInterface, LoggerAwareInt
         $this->drivers[$name] = $driver;
 
         return $this;
+    }
+
+    /**
+     * Drivers and their handlers reference each other, so without this the
+     * connections of a released manager stay open until the cycle collector runs.
+     */
+    public function __destruct()
+    {
+        foreach ($this->ownDrivers as $name => $_) {
+            $this->drivers[$name]->disconnect();
+        }
     }
 
     /**

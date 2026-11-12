@@ -257,4 +257,32 @@ class DatabaseManagerTest extends TestCase
 
         $dbal->driver('default');
     }
+
+    public function testReleasedManagerClosesItsOwnConnections(): void
+    {
+        $dbal = new DatabaseManager(new DatabaseConfig([
+            'default' => 'default',
+            'databases' => ['default' => ['driver' => 'sqlite']],
+            'connections' => ['sqlite' => new SQLiteDriverConfig()],
+        ]));
+        $driver = $dbal->driver('sqlite');
+        $driver->connect();
+        $this->assertTrue($driver->isConnected());
+
+        unset($dbal);
+
+        $this->assertFalse($driver->isConnected());
+    }
+
+    public function testReleasedManagerKeepsAddedDriversConnected(): void
+    {
+        $driver = SQLiteDriver::create(new SQLiteDriverConfig());
+        $dbal = new DatabaseManager(new DatabaseConfig(self::DEFAULT_OPTIONS));
+        $dbal->addDriver('external', $driver);
+        $driver->connect();
+
+        unset($dbal);
+
+        $this->assertTrue($driver->isConnected());
+    }
 }

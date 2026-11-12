@@ -279,12 +279,22 @@ final class EntityFactory implements EntityFactoryInterface
         $roleKey = \var_export($rRole, true);
         $defer = $deferRelations && $relMap->getRelations() !== [] ? "\$n->deferRelations(\$relMap);\n" : '';
         // $groups lists the results by the value of $groupBy, as their nodes have it.
-        $group = $heapGroup = '';
+        $group = $heapGroup = $filter = '';
         if ($groupBy !== null) {
             $groupKey = \var_export($groupBy, true);
+            $groupIndex = \array_search($groupBy, $columns, true);
+            // $only keeps the rows whose group value is one of its keys.
+            $filter = "if (\$only !== null) {\n\$g = \$row[{$groupIndex}];\nif (\$g === null || !isset(\$only[\$g])) {\ncontinue;\n}\n}\n";
             $group = "\$groups[(string) \$d[{$groupKey}]][] = \$o;\n";
             $heapGroup = "\$groups[(string) (\$heap->get(\$o)?->getData()[{$groupKey}] ?? null)][] = \$o;\n";
         }
+
+        // With public fields the loop runs in the node scope and clones a prepared node
+        // instead of calling its constructor for every row.
+        $nodePrototype = new Node(Node::MANAGED, [], $rRole, true);
+        $newNode = $scope === null
+            ? "\$n = clone \$nodePrototype;\n\$n->data = \$d;\n"
+            : "\$n = new \\Arcano\\ORM\\Heap\\Node(\\Arcano\\ORM\\Heap\\Node::MANAGED, \$d, {$roleKey}, true);\n";
 
         // Entities from the heap or without a key take the generic path ($make).
         $make = fn (array $row): object => $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
@@ -293,14 +303,14 @@ final class EntityFactory implements EntityFactoryInterface
         // $nodes the heap node of each result.
         $maker = eval(<<<PHP
             declare(strict_types=1);
-            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null) use (\$heap, \$make, \$prototype, \$relMap): array {
+            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype): array {
                 \$result = [];
                 \$seen = [];
                 \$storage = \$heap->loadedStorage();
                 \$index = &\$heap->loadedIndex({$roleKey});
                 try {
                     foreach (\$rows as \$row) {
-                        \$id = \$row[{$pkIndex}];
+                        {$filter}\$id = \$row[{$pkIndex}];
                         if (\$id === null) {
                             \$result[] = \$o = \$make(\$row);
                             \$nodes === null or \$nodes[] = \$heap->get(\$o);
@@ -318,8 +328,7 @@ final class EntityFactory implements EntityFactoryInterface
                             {$heapGroup}continue;
                         }
                         \$d = [{$build}];
-                        \$n = new \\Arcano\\ORM\\Heap\\Node(\\Arcano\\ORM\\Heap\\Node::MANAGED, \$d, {$roleKey}, true);
-                        \$o = clone \$prototype;
+                        {$newNode}                        \$o = clone \$prototype;
                         {$assign}\$o->__arcano_node = \$n;
                         \$storage[\$o] = \$n;
                         {$index}{$defer}\$fresh === null or \$fresh[\\spl_object_id(\$o)] = true;
@@ -337,7 +346,7 @@ final class EntityFactory implements EntityFactoryInterface
             };
             PHP);
 
-        return $scope === null ? $maker : \Closure::bind($maker, null, $scope);
+        return \Closure::bind($maker, null, $scope ?? Node::class);
     }
 
     /**

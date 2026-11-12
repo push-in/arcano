@@ -1236,8 +1236,11 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             }
             $groups = [];
             if ($keys !== []) {
-                $rows = $whole ? $this->childrenOf($loader, $outer, $keys) : null;
-                if ($rows === null) {
+                $only = null;
+                if ($whole) {
+                    $rows = $this->childrenOf($loader);
+                    $only = $keys;
+                } else {
                     $references = [];
                     foreach ($keys as $value) {
                         $references[] = [$inner => $value];
@@ -1247,7 +1250,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                     $statement->close();
                 }
                 $notTracked = $noNodes = null;
-                $childMaker($rows, $notTracked, $noNodes, $groups);
+                $childMaker($rows, $notTracked, $noNodes, $groups, $only);
             }
             foreach ($parents as $i => $parent) {
                 $value = $parentKeys[$i];
@@ -1290,29 +1293,17 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     }
 
     /**
-     * When the parents are the whole table, their children are the related rows whose key
-     * is one of `$keys`: the relation query without the IN list, filtered here. Null when
-     * a key value is not an integer or string, so the IN query must decide.
+     * When the parents are the whole table, their children are among the related rows:
+     * the relation query without the IN list, filtered by the row maker.
      */
-    private function childrenOf(HasManyLoader $loader, string $outer, array $keys): ?array
+    private function childrenOf(HasManyLoader $loader): array
     {
-        $position = \array_search($outer, $loader->getColumnNames(), true);
         $statement = $loader->buildPostloadQuery([])->run();
         try {
-            $rows = [];
-            foreach ($statement->fetchAll(StatementInterface::FETCH_NUM) as $row) {
-                $value = $row[$position];
-                if (\is_int($value) || \is_string($value)) {
-                    isset($keys[$value]) and $rows[] = $row;
-                } elseif ($value !== null) {
-                    return null;
-                }
-            }
+            return $statement->fetchAll(StatementInterface::FETCH_NUM);
         } finally {
             $statement->close();
         }
-
-        return $rows;
     }
 
     /**

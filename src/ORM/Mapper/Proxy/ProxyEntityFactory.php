@@ -7,6 +7,7 @@ namespace Arcano\ORM\Mapper\Proxy;
 use Arcano\ORM\Mapper\Proxy\Hydrator\ClassPropertiesExtractor;
 use Arcano\ORM\Mapper\Proxy\Hydrator\ClosureHydrator;
 use Arcano\ORM\Mapper\Proxy\Hydrator\PropertyMap;
+use Arcano\ORM\Exception\MapperException;
 use Arcano\ORM\RelationMap;
 use Doctrine\Instantiator\Instantiator;
 
@@ -30,6 +31,9 @@ class ProxyEntityFactory
 
     /** @var array<class-string, array<int, object>> Initialized proxies per class and relation map id. */
     private array $prototypes = [];
+
+    /** @var array<class-string, array{list<\Closure>, array<string, true>}> Generated field hydrators. */
+    private array $hydrators = [];
 
     /** @var array<int, RelationMap> Keeps the relation maps alive so their ids stay unique. */
     private array $relationMaps = [];
@@ -85,6 +89,26 @@ class ProxyEntityFactory
         object $entity,
         array $data,
     ): object {
+        [$setters, $fields] = $this->hydrators[$entity::class] ??= $this->compileHydrator($entity, $relMap);
+        try {
+            $assigned = 0;
+            foreach ($setters as $setter) {
+                $assigned += @$setter($entity, $data);
+            }
+            if ($assigned === \count($data)) {
+                return $entity;
+            }
+            // Relations and keys that are not declared fields.
+            $data = \array_diff_key($data, $fields);
+        } catch (\TypeError $e) {
+            throw new MapperException(
+                "Can't hydrate an entity because property and value types are incompatible.",
+                previous: $e,
+            );
+        } catch (\Throwable) {
+            // Readonly and other edge cases: the generic hydrator decides field by field.
+        }
+
         $properties = $this->getEntityProperties($entity, $relMap);
 
         // new set of data and relations always overwrite entity state
@@ -227,6 +251,38 @@ class ProxyEntityFactory
         $cloneable = !\method_exists($class, '__clone');
 
         return [$class, $scopes[ClassPropertiesExtractor::KEY_RELATIONS], $initializers, $cloneable];
+    }
+
+    /**
+     * One generated closure per declaring scope that assigns the declared
+     * (non-relation) fields present in the data and returns how many it set.
+     *
+     * @return array{list<\Closure(object, array): int>, array<string, true>}
+     */
+    private function compileHydrator(object $entity, RelationMap $relMap): array
+    {
+        $fields = $this->getEntityProperties($entity, $relMap)[ClassPropertiesExtractor::KEY_FIELDS]->getProperties();
+        $setters = [];
+        $names = [];
+        foreach ($fields as $scope => $properties) {
+            $properties = \array_diff($properties, [
+                '__cycle_orm_rel_map', '__cycle_orm_rel_data', '__cycle_orm_relation_props',
+                '__arcano_node', '__arcano_read',
+            ]);
+            if ($properties === []) {
+                continue;
+            }
+            $code = '';
+            foreach ($properties as $property) {
+                $key = \var_export($property, true);
+                $code .= "if (\\array_key_exists({$key}, \$d)) { \$o->{$property} = \$d[{$key}]; ++\$n; }\n";
+                $names[$property] = true;
+            }
+            $setter = eval("declare(strict_types=1);\nreturn static function (object \$o, array \$d): int {\n\$n = 0;\n{$code}return \$n;\n};");
+            $setters[] = $scope === '' ? $setter : \Closure::bind($setter, null, $scope);
+        }
+
+        return [$setters, $names];
     }
 
     private function getEntityProperties(object $entity, RelationMap $relMap): array

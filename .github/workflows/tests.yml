@@ -50,7 +50,7 @@ jobs:
         if: matrix.suite == 'sqlserver'
         run: |
           for i in $(seq 60); do
-            php -r 'try { new PDO("sqlsrv:Server=127.0.0.1,11433;TrustServerCertificate=true", "SA", "YourStrong!Passw0rd"); exit(0); } catch (Throwable) { exit(1); }' && exit 0
+            php -r 'try { new PDO("sqlsrv:Server=127.0.0.1,11433;TrustServerCertificate=true", "SA", "YourStrong!Passw0rd"); exit(0); } catch (Throwable $e) { fwrite(STDERR, $e->getMessage() . "\n"); exit(1); }' && exit 0
             sleep 3
           done
           exit 1

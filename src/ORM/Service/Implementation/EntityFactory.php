@@ -137,6 +137,8 @@ final class EntityFactory implements EntityFactoryInterface
      *
      * @internal
      *
+     * With `$groupBy` the entities are only listed in the `$groups` argument of the closure.
+     *
      * @param list<non-empty-string> $columns
      *
      * @return null|\Closure(iterable<array>): list<object>
@@ -303,12 +305,16 @@ final class EntityFactory implements EntityFactoryInterface
         // Entities from the heap or without a key take the generic path ($make).
         $make = fn (array $row): object => $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
 
+        // Grouped results are only listed in $groups.
+        $append = $groupBy === null ? "\$result[] = \$o;\n" : '';
+        $made = $groupBy === null ? '$result' : '\\array_merge([], ...\\array_values($groups ?? []))';
+
         // One entity per primary key, as the parser gives. A key seen twice is in the heap
         // index by then, so with an indexed key the seen list is built on the first index hit.
         if (\in_array($pk, $keys, true)) {
             $seenInit = "\$seen = null;\n";
             $seenCheck = '';
-            $seenHit = "if (\$seen === null) {\n\$seen = [];\nforeach (\$result as \$r) {\n"
+            $seenHit = "if (\$seen === null) {\n\$seen = [];\nforeach ({$made} as \$r) {\n"
                 . "\$k = \$heap->get(\$r)?->getData()[{$pkKey}] ?? null;\n"
                 . "\$k === null or \$seen[\\is_int(\$k) ? \$k : (string) \$k] = true;\n}\n}\n"
                 . "if (isset(\$seen[\$id])) {\ncontinue;\n}\n\$seen[\$id] = true;\n";
@@ -331,15 +337,15 @@ final class EntityFactory implements EntityFactoryInterface
                     foreach (\$rows as \$row) {
                         {$filter}\$id = \$row[{$pkIndex}];
                         if (\$id === null) {
-                            \$result[] = \$o = \$make(\$row);
-                            \$nodes === null or \$nodes[] = \$heap->get(\$o);
+                            \$o = \$make(\$row);
+                            {$append}                            \$nodes === null or \$nodes[] = \$heap->get(\$o);
                             {$heapGroup}continue;
                         }
                         // Integer keys stay integers: the same array keys without a string per row.
                         \is_int(\$id) or \$id = (string) \$id;
                         {$seenCheck}if (isset(\$index[{$pkKey}][\$id])) {
-                            {$seenHit}                            \$result[] = \$o = \$make(\$row);
-                            \$nodes === null or \$nodes[] = \$heap->get(\$o);
+                            {$seenHit}                            \$o = \$make(\$row);
+                            {$append}                            \$nodes === null or \$nodes[] = \$heap->get(\$o);
                             {$heapGroup}continue;
                         }
                         \$d = [{$build}];
@@ -348,8 +354,7 @@ final class EntityFactory implements EntityFactoryInterface
                         \$storage[\$o] = \$n;
                         {$index}{$defer}{$seenMade}\$fresh === null or \$fresh[\\spl_object_id(\$o)] = true;
                         \$nodes === null or \$nodes[] = \$n;
-                        {$group}\$result[] = \$o;
-                    }
+                        {$group}{$append}                    }
                 } catch (\\TypeError \$e) {
                     throw new \\Arcano\\ORM\\Exception\\MapperException(
                         "Can't hydrate an entity because property and value types are incompatible.",

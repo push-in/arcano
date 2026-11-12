@@ -183,6 +183,13 @@ abstract class EagerWholeTableTest extends BaseTest
         $again = $maker([[4, 2, 'd'], [1, 1, 'x'], [4, 2, 'd'], [1, 1, 'x']]);
         $this->assertCount(2, $again);
         $this->assertSame($made[0], $again[1]);
+
+        $grouped = $factory->rowMaker('comment', ['id', 'user_id', 'message'], 'user_id');
+        $fresh = $nodes = null;
+        $groups = [];
+        $this->assertSame([], $grouped([[5, 1, 'e'], [1, 1, 'a'], [5, 1, 'e'], [1, 1, 'a']], $fresh, $nodes, $groups));
+        $this->assertSame([1], \array_keys($groups));
+        $this->assertSame(['e', 'a'], \array_map(static fn (Comment $c) => $c->message, $groups[1]));
     }
 
     private function texts(?iterable $comments): array

@@ -18,10 +18,36 @@ ORM 2.18.1 (`../compare.sh`). The PDO column is the floor.
 - Generated field hydrators per entity class (strict_types like before).
 - Benchmarks take the fastest of N runs (tars has other agents running).
 
+## Done in round 4
+- Row makers: root-only selects go rows → entities without the parser
+  (compiled typecast + generated clone/assign hydrator + lean heap attach).
+- Query shapes: simple where/orderBy/limit/offset calls are recorded, the
+  builder is unset until something else reads it (`Select::__get`); fetchAll
+  runs a statement cached per shape. Repository selects share their loader
+  until used (copy on write).
+- Cached UPDATE and INSERT statements per table/column set (`StatementPlans`);
+  insert queries split compile (`run`) from execution (`runStatement`).
+- Memoized `State::getChanges`, strict compare first, syncHeap reindexes only
+  when an indexed value changed.
+- Direct updates: managed entities whose relations were never read/assigned
+  are updated without the pool (`UnitOfWork::runDirect`).
+- Compiled data makers in `EntityFactory::make` for column-only managed data;
+  has-many POSTLOAD loads without the parser (`Select::fetchEager`).
+- Fixed two Cycle bugs: `Heap::eraseIndexes` leaked the key between indexes;
+  a failed cached PDO statement was reused (SQLite API misuse).
+
 ## Status (fastest run, ms; Cycle / Eloquent / Arcano / PDO)
-insert 335/322/147/12, select_all 6.3/2.3/3.7/0.8, find_pk 21.9/41.9/5.9/1.7,
-eager 39.4/30.9/39.8/4.7, update 43/63/37/1.8, small 51/61/38/5.4.
-Per-entity `EntityFactory::make` (~2.7 µs) is now the bottleneck everywhere.
+`compare.sh` now also prints overhead ratios: (ORM − PDO) / (Arcano − PDO).
+- insert 332/310/153/12 → overhead 2.3x / 2.1x
+- select_all 6.2/2.1/1.9/0.8 → 5.2x / 1.35x
+- find_pk 21.3/41.7/4.4/1.7 → 7.1x / 14.5x
+- eager 41/31.6/24.6/4.8 → 1.8x / 1.4x
+- update 43.2/62.3/8.7/1.8 → 6.0x / 8.7x
+- small 50.1/60.7/14.6/5.4 → 4.8x / 6.0x
+
+Next: direct insert path for new graphs (new roots + new has-many children,
+no masters/embedded), lean heap (no Node per row until needed), then eager
+and select_all against Eloquent.
 
 ## Read path (select_all, find_pk, eager, small_queries)
 Budget for 5x: about 0.25 µs of ORM work per row above hand-written PDO and

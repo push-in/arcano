@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Arcano\ORM;
 
+use Arcano\Database\Driver\DriverInterface;
+
 use Arcano\Database\Injection\ParameterInterface;
 
 use Arcano\Database\Query\QueryParameters;
@@ -868,7 +870,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      *
      * @internal
      *
-     * @return array{SelectQuery, array, int, RootLoader}|null
+     * @return array{DriverInterface, string, array, int, string, list<string>}|null
      */
     public function primaryKeyPlan(): ?array
     {
@@ -895,7 +897,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $values = $parameters->getParameters();
         foreach ($values as $index => $value) {
             if (($value instanceof ParameterInterface ? $value->getValue() : $value) === $sentinel) {
-                return [$query, $values, $index, $select->loader, $sql];
+                return [$query->getDriver(), $sql, $values, $index, $select->loader->getTarget(), $select->loader->getColumnNames()];
             }
         }
 
@@ -909,20 +911,17 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function fetchByPrimaryKeyPlan(array $plan, int|string $id): ?object
     {
-        [$query, $values, $index, $loader, $sql] = $plan;
+        [$driver, $sql, $values, $index, $role, $columns] = $plan;
         $values[$index] = $values[$index] instanceof ParameterInterface ? new Parameter($id) : $id;
-        $statement = $query->getDriver()->query($sql, $values);
-        $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+        $statement = $driver->query($sql, $values);
+        $row = $statement->fetch(StatementInterface::FETCH_NUM);
         $statement->close();
-        if ($rows === []) {
+        if ($row === false) {
             return null;
         }
 
-        $node = $loader->createNode();
-        $loader->parseRows($node, $rows);
-        $data = $node->getResult();
-
-        return $this->entityFactory->make($loader->getTarget(), $data[0], Node::MANAGED, typecast: true);
+        // A root-only row: the parser would only name its columns.
+        return $this->entityFactory->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
     }
 
     /**

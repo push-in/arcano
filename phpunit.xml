@@ -13,5 +13,13 @@
             <directory>tests/ORM/Functional/Driver/SQLite</directory>
             <directory>tests/Database/Functional/Driver/SQLite</directory>
         </testsuite>
+        <testsuite name="mysql">
+            <directory>tests/ORM/Functional/Driver/MySQL</directory>
+            <directory>tests/Database/Functional/Driver/MySQL</directory>
+        </testsuite>
+        <testsuite name="postgres">
+            <directory>tests/ORM/Functional/Driver/Postgres</directory>
+            <directory>tests/Database/Functional/Driver/Postgres</directory>
+        </testsuite>
     </testsuites>
 </phpunit>

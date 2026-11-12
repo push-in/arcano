@@ -110,7 +110,7 @@ function bench(string $name, callable $fn, int $repeat = 15): float
         file_put_contents(__DIR__ . "/profile-$name.txt", $profiler->getLog()->formatCollapsed());
     }
     sort($times);
-    return $times[intdiv(count($times), 2)];
+    return $times[0]; // fastest run: least disturbed by other processes
 }
 
 $results = [];

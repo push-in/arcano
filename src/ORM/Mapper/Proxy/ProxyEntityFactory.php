@@ -25,8 +25,14 @@ class ProxyEntityFactory
     /** @var PropertyMap[] */
     private array $classProperties = [];
 
-    /** @var array<class-string, array{class-string, PropertyMap, list<array{\Closure, array}>}> */
+    /** @var array<class-string, array{class-string, PropertyMap, list<array{\Closure, array}>, bool}> */
     private array $plans = [];
+
+    /** @var array<class-string, array<int, object>> Initialized proxies per class and relation map id. */
+    private array $prototypes = [];
+
+    /** @var array<int, RelationMap> Keeps the relation maps alive so their ids stay unique. */
+    private array $relationMaps = [];
 
     private Instantiator $instantiator;
     private \Closure $initializer;
@@ -50,13 +56,25 @@ class ProxyEntityFactory
         RelationMap $relMap,
         string $sourceClass,
     ): object {
-        [$class, $relationProps, $initializers] = $this->plans[$sourceClass] ??= $this->plan($relMap, $sourceClass);
+        $prototype = $this->prototypes[$sourceClass][\spl_object_id($relMap)] ?? null;
+        if ($prototype !== null) {
+            return clone $prototype;
+        }
+
+        [$class, $relationProps, $initializers, $cloneable] = $this->plans[$sourceClass] ??= $this->plan($relMap, $sourceClass);
 
         $proxy = $this->instantiator->instantiate($class);
         $proxy->__cycle_orm_rel_map = $relMap;
         $proxy->__cycle_orm_relation_props = $relationProps;
         foreach ($initializers as [$initializer, $properties]) {
             $initializer($proxy, $properties);
+        }
+
+        if ($cloneable) {
+            // Later entities of this class and relation map are clones of this one.
+            $this->prototypes[$sourceClass][\spl_object_id($relMap)] = $proxy;
+            $this->relationMaps[\spl_object_id($relMap)] = $relMap;
+            return clone $proxy;
         }
 
         return $proxy;
@@ -205,7 +223,10 @@ class ProxyEntityFactory
             $initializers[] = [\Closure::bind($this->initializer, null, $scope === '' ? $class : $scope), $properties];
         }
 
-        return [$class, $scopes[ClassPropertiesExtractor::KEY_RELATIONS], $initializers];
+        // A user __clone() must not run for entities the ORM creates.
+        $cloneable = !\method_exists($class, '__clone');
+
+        return [$class, $scopes[ClassPropertiesExtractor::KEY_RELATIONS], $initializers, $cloneable];
     }
 
     private function getEntityProperties(object $entity, RelationMap $relMap): array

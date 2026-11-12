@@ -65,11 +65,31 @@ class Mapper extends DatabaseMapper
      *
      * @see ProxyEntityFactory::rowPlan()
      */
-    public function rowPlan(array $fields): ?array
+    public function rowPlan(array $fields, bool $loaded = false): ?array
     {
         return $this->children === []
-            ? $this->entityFactory->rowPlan($this->relationMap, $this->entity, $fields)
+            ? $this->entityFactory->rowPlan($this->relationMap, $this->entity, $fields, $loaded)
             : null;
+    }
+
+    /**
+     * @internal
+     *
+     * @see ProxyEntityFactory::relationAssigner()
+     */
+    public function relationAssigner(string $name): \Closure
+    {
+        return $this->entityFactory->relationAssigner($this->entity, $name);
+    }
+
+    /**
+     * @internal
+     *
+     * @see ProxyEntityFactory::unsetRelation()
+     */
+    public function unsetRelation(object $entity, string $name): void
+    {
+        $this->entityFactory->unsetRelation($this->entity, $entity, $name);
     }
 
     public function hydrate(object $entity, array $data): object

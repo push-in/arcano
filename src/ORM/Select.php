@@ -1194,21 +1194,31 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                 return null;
             }
             $childMaker = $this->entityFactory->rowMaker($loader->getTarget(), $columns, $outer[0]);
-            $setter = $this->entityFactory->freshRelationSetter($role, $name);
-            if ($childMaker === null || $setter === null) {
+            if ($childMaker === null) {
                 return null;
             }
-            $relations[] = [$name, $loader, $childMaker, $inner[0], $outer[0], $setter];
+            $relations[] = [$name, $loader, $childMaker, $inner[0], $outer[0], null];
         }
         if ($relations === []) {
             return null;
         }
-        // When every relation is loaded here, new parents defer references only for a missing key.
+        // When every relation is loaded here, new parents keep plain relation properties and
+        // defer references only for a missing key.
         $relationMap = $this->entityFactory->relationMap($role);
         $all = \count($relations) === \count($relationMap->getRelations());
         $parentMaker = $this->entityFactory->rowMaker($role, $this->loader->getColumnNames(), deferRelations: !$all);
+        if ($parentMaker === null) {
+            return null;
+        }
+        foreach ($relations as &$relation) {
+            $relation[5] = $this->entityFactory->freshRelationSetter($role, $relation[0], $all);
+            if ($relation[5] === null) {
+                return null;
+            }
+        }
+        unset($relation);
 
-        return $parentMaker === null ? null : [$role, $parentMaker, $relations, $all ? $relationMap : null];
+        return [$role, $parentMaker, $relations, $all ? $relationMap : null];
     }
 
     /**
@@ -1224,7 +1234,31 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $fresh = [];
         $parentNodes = [];
         $parents = $parentMaker($rows, $fresh, $parentNodes);
+        try {
+            $this->loadEager($role, $parents, $fresh, $parentNodes, $whole, $relations, $undeferred);
+        } catch (\Throwable $e) {
+            // New parents of a loaded maker must not stay in the heap without their relations.
+            if ($undeferred !== null) {
+                $this->entityFactory->discard(\array_filter(
+                    $parents,
+                    static fn (object $parent): bool => isset($fresh[\spl_object_id($parent)]),
+                ));
+            }
+            throw $e;
+        }
 
+        return $parents;
+    }
+
+    private function loadEager(
+        string $role,
+        array $parents,
+        array $fresh,
+        array $parentNodes,
+        bool $whole,
+        array $relations,
+        ?RelationMap $undeferred,
+    ): void {
         foreach ($relations as [$name, $loader, $childMaker, $inner, $outer, $setter]) {
             // The parent keys, as the parser's reference index would give them.
             $keys = [];
@@ -1265,13 +1299,11 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                     );
                 } elseif ($value !== null) {
                     $setter($parent, $parentNodes[$i], $groups[(string) $value] ?? []);
-                } else {
-                    $undeferred === null or $parentNodes[$i]->deferRelations($undeferred);
+                } elseif ($undeferred !== null) {
+                    $this->entityFactory->deferLoaded($role, $parent, $parentNodes[$i], $name);
                 }
             }
         }
-
-        return $parents;
     }
 
     /**

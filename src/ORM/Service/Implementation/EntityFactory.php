@@ -153,7 +153,7 @@ final class EntityFactory implements EntityFactoryInterface
      *
      * @return array{string, \Arcano\ORM\RelationMap, string, list<string>, array, array}|null
      */
-    private function makerPlan(string $role, array $fields): ?array
+    private function makerPlan(string $role, array $fields, bool $loaded = false): ?array
     {
         [$rRole, $relMap, $mapper, $pk, $indexes, $deferReferences] = $this->roles[$role] ??= $this->describe($role);
         if (
@@ -182,7 +182,7 @@ final class EntityFactory implements EntityFactoryInterface
             }
             $keys[] = $key;
         }
-        $rowPlan = $mapper->rowPlan($fields);
+        $rowPlan = $mapper->rowPlan($fields, $loaded);
 
         return $rowPlan === null ? null : [$rRole, $relMap, $pk, $keys, $rules, $rowPlan];
     }
@@ -253,7 +253,8 @@ final class EntityFactory implements EntityFactoryInterface
      */
     private function compileRowMaker(string $role, array $columns, ?string $groupBy, bool $deferRelations): ?\Closure
     {
-        $plan = $this->makerPlan($role, $columns);
+        // Without deferred relations the caller assigns them all: plain relation properties.
+        $plan = $this->makerPlan($role, $columns, !$deferRelations);
         if ($plan === null || ($groupBy !== null && !\in_array($groupBy, $columns, true))) {
             return null;
         }
@@ -366,7 +367,7 @@ final class EntityFactory implements EntityFactoryInterface
      *
      * @return null|\Closure(object, Node, array): void
      */
-    public function freshRelationSetter(string $role, string $name): ?\Closure
+    public function freshRelationSetter(string $role, string $name, bool $loaded = false): ?\Closure
     {
         [, $relMap, $mapper, , , $proxies] = $this->roles[$role] ??= $this->describe($role);
         $class = $this->schema->define($role, SchemaInterface::ENTITY);
@@ -374,6 +375,24 @@ final class EntityFactory implements EntityFactoryInterface
             return null;
         }
         $relation = $relMap->getRelations()[$name];
+        if ($loaded) {
+            if (!$mapper instanceof Mapper) {
+                return null;
+            }
+            // Entities of a loaded row maker: the property is declared and still set.
+            $assign = $mapper->relationAssigner($name);
+            return static function (object $entity, Node $node, array $elements) use ($relation, $name, $assign): void {
+                $node->setRelation($name, $elements);
+                try {
+                    $assign($entity, $relation->collect($elements));
+                } catch (\TypeError $e) {
+                    throw new MapperException(
+                        "Can't hydrate an entity because property and value types are incompatible.",
+                        previous: $e,
+                    );
+                }
+            };
+        }
 
         return static function (object $entity, Node $node, array $elements) use ($relation, $name): void {
             $node->setRelation($name, $elements);
@@ -386,6 +405,31 @@ final class EntityFactory implements EntityFactoryInterface
                 );
             }
         };
+    }
+
+    /**
+     * For an entity of a loaded row maker whose relation won't be set: a lazy relation
+     * as the default row maker gives.
+     *
+     * @internal
+     */
+    public function deferLoaded(string $role, object $entity, Node $node, string $name): void
+    {
+        [, $relMap, $mapper] = $this->roles[$role] ??= $this->describe($role);
+        $mapper->unsetRelation($entity, $name);
+        $node->deferRelations($relMap);
+    }
+
+    /**
+     * Removes entities from the heap.
+     *
+     * @internal
+     */
+    public function discard(array $entities): void
+    {
+        foreach ($entities as $entity) {
+            $this->heap->detach($entity);
+        }
     }
 
     /**

@@ -25,13 +25,13 @@ abstract class EagerWholeTableTest extends BaseTest
     {
         parent::setUp();
 
-        $this->makeTable('user', ['id' => 'primary', 'email' => 'string', 'balance' => 'float']);
+        $this->makeTable('user', ['id' => 'primary', 'email' => 'string', 'balance' => 'float', 'user_code' => 'integer,null']);
         $this->makeIndex('user', ['email'], true);
         $this->makeTable('comment', ['id' => 'primary', 'user_id' => 'integer,null', 'message' => 'string']);
 
         $this->getDatabase()->table('user')->insertMultiple(
-            ['email', 'balance'],
-            [['hello@world.com', 100], ['another@world.com', 200]],
+            ['email', 'balance', 'user_code'],
+            [['hello@world.com', 100, 1], ['another@world.com', 200, null]],
         );
         $this->getDatabase()->table('comment')->insertMultiple(
             ['user_id', 'message'],
@@ -46,8 +46,8 @@ abstract class EagerWholeTableTest extends BaseTest
                 Schema::TABLE => 'user',
                 Schema::PRIMARY_KEY => 'id',
                 Schema::FIND_BY_KEYS => ['email'],
-                Schema::COLUMNS => ['id', 'email', 'balance'],
-                Schema::TYPECAST => ['id' => 'int', 'balance' => 'float'],
+                Schema::COLUMNS => ['id', 'email', 'balance', 'user_code'],
+                Schema::TYPECAST => ['id' => 'int', 'balance' => 'float', 'user_code' => 'int'],
                 Schema::SCHEMA => [],
                 Schema::RELATIONS => [
                     'comments' => [
@@ -56,6 +56,15 @@ abstract class EagerWholeTableTest extends BaseTest
                         Relation::SCHEMA => [
                             Relation::CASCADE => true,
                             Relation::INNER_KEY => 'id',
+                            Relation::OUTER_KEY => 'user_id',
+                        ],
+                    ],
+                    'favorites' => [
+                        Relation::TYPE => Relation::HAS_MANY,
+                        Relation::TARGET => Comment::class,
+                        Relation::SCHEMA => [
+                            Relation::CASCADE => true,
+                            Relation::INNER_KEY => 'user_code',
                             Relation::OUTER_KEY => 'user_id',
                         ],
                     ],
@@ -126,6 +135,49 @@ abstract class EagerWholeTableTest extends BaseTest
 
         $this->assertNotSame($fast, $parsed);
         $this->assertSame($this->fields($parsed), $this->fields($fast));
+    }
+
+    public function testEveryRelationLoadedMatchesTheParser(): void
+    {
+        $select = fn () => $this->orm->getRepository(User::class)->select()
+            ->load('comments')->load('favorites')->orderBy('id');
+        $fast = $select()->fetchAll();
+        $this->orm->getHeap()->clean();
+        $parsed = \iterator_to_array($select()->getIterator());
+
+        $this->assertSame(['msg 1', 'msg 3'], $this->messages($fast[0]));
+        $this->assertSame(['msg 2'], $this->messages($fast[1]));
+        foreach ([0, 1] as $i) {
+            $this->assertSame($this->messages($parsed[$i]), $this->messages($fast[$i]));
+            $this->assertSame($this->texts($parsed[$i]->favorites), $this->texts($fast[$i]->favorites));
+        }
+        // The user without a code reads its favorites lazily, as the parser leaves them.
+        $this->assertSame([], $this->texts($fast[1]->favorites));
+    }
+
+    public function testEveryRelationLoadedKeepsChangesTracked(): void
+    {
+        $user = $this->orm->getRepository(User::class)->select()
+            ->load('comments')->load('favorites')->orderBy('id')->fetchAll()[1];
+        $comment = new Comment();
+        $comment->message = 'new';
+        $user->comments[] = $comment;
+        (new EntityManager($this->orm))->persist($user)->run();
+
+        $this->orm->getHeap()->clean();
+        $user = $this->orm->getRepository(User::class)->findByPK(2);
+        $this->assertSame(['msg 2', 'new'], $this->messages($user));
+    }
+
+    private function texts(?iterable $comments): array
+    {
+        $messages = [];
+        foreach ($comments ?? [] as $comment) {
+            $messages[] = $comment->message;
+        }
+        \sort($messages);
+
+        return $messages;
     }
 
     private function fields(object $entity): array

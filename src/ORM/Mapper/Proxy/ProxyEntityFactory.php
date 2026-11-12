@@ -32,6 +32,9 @@ class ProxyEntityFactory
     /** @var array<class-string, array<int, object>> Initialized proxies per class and relation map id. */
     private array $prototypes = [];
 
+    /** @var array<class-string, array<int, object|null>> Proxies whose relation properties keep their declared state. */
+    private array $loadedPrototypes = [];
+
     /** @var array<class-string, array{list<\Closure>, array<string, true>}> Generated field hydrators. */
     private array $hydrators = [];
 
@@ -150,14 +153,20 @@ class ProxyEntityFactory
      * the class scope that code must run in (null for public fields). Null when a field
      * is not a declared property of a single scope or the class can't be cloned.
      *
+     * With `$loaded` the relation properties are not made lazy: the caller assigns every
+     * relation with {@see relationAssigner()} or calls {@see unsetRelations()}.
+     *
      * @param list<non-empty-string> $fields
      *
      * @return array{object, string, class-string|null}|null
      */
-    public function rowPlan(RelationMap $relMap, string $sourceClass, array $fields): ?array
+    public function rowPlan(RelationMap $relMap, string $sourceClass, array $fields, bool $loaded = false): ?array
     {
         $sample = $this->create($relMap, $sourceClass);
         $prototype = $this->prototypes[$sourceClass][\spl_object_id($relMap)] ?? null;
+        if ($prototype !== null && $loaded) {
+            $prototype = $this->loadedPrototype($relMap, $sourceClass);
+        }
         if ($prototype === null) {
             return null;
         }
@@ -195,6 +204,53 @@ class ProxyEntityFactory
         }
 
         return [$prototype, $code, $scope === '' ? null : $scope];
+    }
+
+    /**
+     * Assigns a loaded relation to an entity made from a loaded row plan.
+     *
+     * @return \Closure(object, mixed): void
+     */
+    public function relationAssigner(string $sourceClass, string $name): \Closure
+    {
+        $scope = $this->plans[$sourceClass][1]->getPropertyClass($name);
+        $assign = static function (object $entity, mixed $value) use ($name): void {
+            $entity->{$name} = $value;
+        };
+
+        return $scope === PropertyMap::PUBLIC_CLASS ? $assign : \Closure::bind($assign, null, $scope);
+    }
+
+    /**
+     * Makes a relation property of an entity from a loaded row plan lazy, as {@see create()} does.
+     */
+    public function unsetRelation(string $sourceClass, object $entity, string $name): void
+    {
+        $scope = $this->plans[$sourceClass][1]->getPropertyClass($name);
+        $scope === PropertyMap::PUBLIC_CLASS and $scope = $this->plans[$sourceClass][0];
+        \Closure::bind($this->initializer, null, $scope)($entity, [$name]);
+    }
+
+    /**
+     * Null when a relation is not a declared property.
+     */
+    private function loadedPrototype(RelationMap $relMap, string $sourceClass): ?object
+    {
+        $id = \spl_object_id($relMap);
+        if (\array_key_exists($id, $this->loadedPrototypes[$sourceClass] ?? [])) {
+            return $this->loadedPrototypes[$sourceClass][$id];
+        }
+        [$class, $relationProps] = $this->plans[$sourceClass];
+        foreach ($relMap->getRelations() as $name => $_) {
+            if ($relationProps->getPropertyClass($name) === null) {
+                return $this->loadedPrototypes[$sourceClass][$id] = null;
+            }
+        }
+        $proxy = $this->instantiator->instantiate($class);
+        $proxy->__cycle_orm_rel_map = $relMap;
+        $proxy->__cycle_orm_relation_props = $relationProps;
+
+        return $this->loadedPrototypes[$sourceClass][$id] = $proxy;
     }
 
     /**

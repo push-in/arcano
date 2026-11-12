@@ -51,7 +51,8 @@ final class Heap implements HeapInterface, \IteratorAggregate
         }
 
         if (!$isComposite) {
-            $value = (string) \current($scope);
+            $value = \current($scope);
+            \is_int($value) or $value = (string) $value;
             return $this->paths[$role][$indexName][$value] ?? null;
         }
         $result = null;
@@ -107,7 +108,8 @@ final class Heap implements HeapInterface, \IteratorAggregate
         $this->storage[$entity] = $node;
         foreach ($keys as $key) {
             if (isset($data[$key])) {
-                $this->paths[$role][$key][(string) $data[$key]] = $entity;
+                $value = $data[$key];
+                $this->paths[$role][$key][\is_int($value) ? $value : (string) $value] = $entity;
             }
         }
     }
@@ -181,8 +183,8 @@ final class Heap implements HeapInterface, \IteratorAggregate
                 if (!isset($data[$indexName])) {
                     continue;
                 }
-                $value = (string) $data[$indexName];
-                $rolePath[$value] = $entity;
+                $value = $data[$indexName];
+                $rolePath[\is_int($value) ? $value : (string) $value] = $entity;
             }
         }
     }

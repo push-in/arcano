@@ -274,7 +274,7 @@ final class EntityFactory implements EntityFactoryInterface
         $index = '';
         foreach ($keys as $key) {
             $key = \var_export($key, true);
-            $index .= "isset(\$d[{$key}]) and \$index[{$key}][(string) \$d[{$key}]] = \$o;\n";
+            $index .= "isset(\$d[{$key}]) and \$index[{$key}][\\is_int(\$k = \$d[{$key}]) ? \$k : (string) \$k] = \$o;\n";
         }
         $pkKey = \var_export($pk, true);
         $roleKey = \var_export($rRole, true);
@@ -286,7 +286,7 @@ final class EntityFactory implements EntityFactoryInterface
             $groupIndex = \array_search($groupBy, $columns, true);
             // $only keeps the rows whose group value is one of its keys.
             $filter = "if (\$only !== null) {\n\$g = \$row[{$groupIndex}];\nif (\$g === null || !isset(\$only[\$g])) {\ncontinue;\n}\n}\n";
-            $group = "\$groups[(string) \$d[{$groupKey}]][] = \$o;\n";
+            $group = "\$groups[\\is_int(\$k = \$d[{$groupKey}]) ? \$k : (string) \$k][] = \$o;\n";
             $heapGroup = "\$groups[(string) (\$heap->get(\$o)?->getData()[{$groupKey}] ?? null)][] = \$o;\n";
         }
 
@@ -317,7 +317,8 @@ final class EntityFactory implements EntityFactoryInterface
                             \$nodes === null or \$nodes[] = \$heap->get(\$o);
                             {$heapGroup}continue;
                         }
-                        \$id = (string) \$id;
+                        // Integer keys stay integers: the same array keys without a string per row.
+                        \is_int(\$id) or \$id = (string) \$id;
                         // Same as the parser: one entity per primary key.
                         if (isset(\$seen[\$id])) {
                             continue;

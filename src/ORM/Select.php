@@ -1266,7 +1266,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             foreach ($parentNodes as $i => $node) {
                 $value = $node?->getData()[$inner] ?? null;
                 $parentKeys[$i] = $value;
-                $value === null or $keys[(string) $value] = $value;
+                $value === null or $keys[\is_int($value) ? $value : (string) $value] = $value;
             }
             $groups = [];
             if ($keys !== []) {
@@ -1293,12 +1293,12 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                         $role,
                         $parent,
                         $name,
-                        $groups[(string) $value] ?? [],
+                        $groups[\is_int($value) ? $value : (string) $value] ?? [],
                         false,
                         $parentNodes[$i],
                     );
                 } elseif ($value !== null) {
-                    $setter($parent, $parentNodes[$i], $groups[(string) $value] ?? []);
+                    $setter($parent, $parentNodes[$i], $groups[\is_int($value) ? $value : (string) $value] ?? []);
                 } elseif ($undeferred !== null) {
                     $this->entityFactory->deferLoaded($role, $parent, $parentNodes[$i], $name);
                 }

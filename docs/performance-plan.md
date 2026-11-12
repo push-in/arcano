@@ -79,3 +79,16 @@ David wants Arcano 5x faster than Eloquent as well (`../bench-eloquent`,
 Eloquent 12.72; `../compare.sh` prints both). Target per scenario =
 min(Cycle, Eloquent) / 5. Exception: select_all, where Eloquent (2.4 ms) / 5
 is below the PDO floor (0.8 ms); there the goal is the floor itself (~3x).
+
+## Status (2026-11-12, round 7)
+Overhead ratio (ORM ms − PDO ms), two runs, SQLite memory, PHP 8.5 JIT:
+
+- vs Cycle: insert 6.8x, select_all 9.5x, find_pk 7.2–7.9x, eager 5.7–5.9x,
+  update 6.3–6.4x, small_queries 6.1–6.4x. All at or above 5x.
+- vs Eloquent: insert 6.4x, find_pk 15x, update 8.9x, small_queries 7.7–8x,
+  eager 4.5–4.7x, select_all 2.4x.
+
+What is left is per-row allocation: one entity, one heap `Node` and one data
+array per row, plus their release. Eloquent keeps no identity map and no change
+snapshot, so select_all against it stays near 2.4x without dropping those.
+Heap storage writes are not the cost (`SplObjectStorage` ~0.02 ms per 2000).

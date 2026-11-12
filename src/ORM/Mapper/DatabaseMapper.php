@@ -86,6 +86,18 @@ abstract class DatabaseMapper implements MapperInterface
         };
     }
 
+    /**
+     * The entity fields stored in the role's own columns.
+     *
+     * @internal
+     *
+     * @return list<non-empty-string>
+     */
+    public function columnFields(): array
+    {
+        return \array_keys($this->columns);
+    }
+
     public function getRole(): string
     {
         return $this->role;

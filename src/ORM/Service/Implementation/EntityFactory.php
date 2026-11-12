@@ -30,6 +30,9 @@ final class EntityFactory implements EntityFactoryInterface
      */
     private array $roles = [];
 
+    /** @var array<string, \Closure|false> Data makers per role. */
+    private array $dataMakers = [];
+
     /** @var array<string, \Closure|false> Row makers per role and column list. */
     private array $rowMakers = [];
 
@@ -50,6 +53,14 @@ final class EntityFactory implements EntityFactoryInterface
     ): object {
         $role = $data[LoaderInterface::ROLE_KEY] ?? $role;
         unset($data[LoaderInterface::ROLE_KEY]);
+
+        if ($status === Node::MANAGED) {
+            $maker = $this->dataMakers[$role] ??= $this->compileDataMaker($role) ?? false;
+            if ($maker !== false && ($entity = $maker($data, $typecast)) !== null) {
+                return $entity;
+            }
+        }
+
         [$rRole, $relMap, $mapper, $pk, $indexes, $deferReferences] = $this->roles[$role] ??= $this->describe($role);
 
         $castedData = $typecast ? $mapper->cast($data) : $data;
@@ -131,24 +142,29 @@ final class EntityFactory implements EntityFactoryInterface
             ?: null;
     }
 
-    private function compileRowMaker(string $role, array $columns): ?\Closure
+    /**
+     * What the compiled makers need for a role and field list, or null when the role
+     * needs the generic path (custom mapper or typecast, inheritance, composite key).
+     *
+     * @return array{string, \Arcano\ORM\RelationMap, string, list<string>, array, \Closure}|null
+     */
+    private function makerPlan(string $role, array $fields): ?array
     {
         [$rRole, $relMap, $mapper, $pk, $indexes, $deferReferences] = $this->roles[$role] ??= $this->describe($role);
-        $heap = $this->heap;
         if (
             !$deferReferences
-            || !$heap instanceof Heap
+            || !$this->heap instanceof Heap
             || !\is_string($pk)
             || $rRole !== $role
             || $this->schema->define($role, SchemaInterface::PARENT) !== null
             || ($this->schema->define($role, SchemaInterface::CHILDREN) ?? []) !== []
-            || \count(\array_unique($columns)) !== \count($columns)
+            || \count(\array_unique($fields)) !== \count($fields)
+            || !\in_array($pk, $fields, true)
         ) {
             return null;
         }
-        $pkIndex = \array_search($pk, $columns, true);
         $rules = $mapper->plainCastRules();
-        if ($pkIndex === false || $rules === null) {
+        if ($rules === null) {
             return null;
         }
         $keys = [];
@@ -161,10 +177,77 @@ final class EntityFactory implements EntityFactoryInterface
             }
             $keys[] = $key;
         }
-        $hydrate = $mapper->compileRowHydrator($columns);
-        if ($hydrate === null) {
+        $hydrate = $mapper->compileRowHydrator($fields);
+
+        return $hydrate === null ? null : [$rRole, $relMap, $pk, $keys, $rules, $hydrate];
+    }
+
+    /**
+     * For managed data with exactly the column fields of the role: creates the entity
+     * like {@see make()} without dispatch. Returns null when the generic path must run
+     * (other keys, missing key, already in the heap).
+     *
+     * @return null|\Closure(array, bool): ?object
+     */
+    private function compileDataMaker(string $role): ?\Closure
+    {
+        $mapper = ($this->roles[$role] ??= $this->describe($role))[2];
+        if (!$mapper instanceof Mapper) {
             return null;
         }
+        $fields = $mapper->columnFields();
+        $plan = $this->makerPlan($role, $fields);
+        if ($plan === null) {
+            return null;
+        }
+        [$rRole, $relMap, $pk, $keys, $rules, $hydrate] = $plan;
+
+        $items = [];
+        foreach (\array_intersect_key($rules, \array_flip($fields)) as $field => $rule) {
+            $key = \var_export($field, true);
+            $items[] = "\$d[{$key}] === null or \$d[{$key}] = ({$rule}) \$d[{$key}];";
+        }
+        $cast = eval("declare(strict_types=1);\nreturn static function (array \$d): array {\n" . \implode("\n", $items) . "\nreturn \$d;\n};");
+        $flip = \array_fill_keys($fields, true);
+        $count = \count($fields);
+        $heap = $this->heap;
+        $deferRelations = $relMap->getRelations() !== [];
+
+        return static function (array $data, bool $typecast) use (
+            $rRole, $relMap, $pk, $keys, $hydrate, $cast, $flip, $count, $heap, $deferRelations,
+        ): ?object {
+            if (\count($data) !== $count || !isset($data[$pk]) || \array_diff_key($data, $flip) !== []) {
+                return null;
+            }
+            if ($heap->findKey($rRole, $pk, (string) $data[$pk]) !== null) {
+                return null;
+            }
+            $typecast and $data = $cast($data);
+            $node = new Node(Node::MANAGED, $data, $rRole);
+            try {
+                $entity = $hydrate($data, $node);
+            } catch (\TypeError $e) {
+                throw new MapperException(
+                    "Can't hydrate an entity because property and value types are incompatible.",
+                    previous: $e,
+                );
+            }
+            $heap->attachLoaded($entity, $node, $rRole, $data, $keys);
+            $deferRelations and $node->deferRelations($relMap);
+
+            return $entity;
+        };
+    }
+
+    private function compileRowMaker(string $role, array $columns): ?\Closure
+    {
+        $plan = $this->makerPlan($role, $columns);
+        if ($plan === null) {
+            return null;
+        }
+        [$rRole, $relMap, $pk, $keys, $rules, $hydrate] = $plan;
+        $heap = $this->heap;
+        $pkIndex = \array_search($pk, $columns, true);
 
         // Typecast compiled into the array literal: null stays null, as in Typecast::cast().
         $items = [];
@@ -177,7 +260,9 @@ final class EntityFactory implements EntityFactoryInterface
         $build = eval("declare(strict_types=1);\nreturn static fn (array \$r): array => [" . \implode(', ', $items) . '];');
         $deferRelations = $relMap->getRelations() !== [];
 
-        return function (iterable $rows) use (
+        // $fresh collects the ids of the entities created here (not taken from the heap),
+        // $nodes the heap node of each result.
+        return function (iterable $rows, ?array &$fresh = null, ?array &$nodes = null) use (
             $role, $rRole, $relMap, $pk, $pkIndex, $columns, $keys, $heap, $build, $hydrate, $deferRelations,
         ): array {
             $result = [];
@@ -186,7 +271,8 @@ final class EntityFactory implements EntityFactoryInterface
                 foreach ($rows as $row) {
                     $id = $row[$pkIndex];
                     if ($id === null) {
-                        $result[] = $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
+                        $result[] = $entity = $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
+                        $nodes === null or $nodes[] = $heap->get($entity);
                         continue;
                     }
                     $id = (string) $id;
@@ -196,7 +282,8 @@ final class EntityFactory implements EntityFactoryInterface
                     }
                     $seen[$id] = true;
                     if ($heap->findKey($rRole, $pk, $id) !== null) {
-                        $result[] = $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
+                        $result[] = $entity = $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
+                        $nodes === null or $nodes[] = $heap->get($entity);
                         continue;
                     }
 
@@ -205,6 +292,8 @@ final class EntityFactory implements EntityFactoryInterface
                     $entity = $hydrate($data, $node);
                     $heap->attachLoaded($entity, $node, $rRole, $data, $keys);
                     $deferRelations and $node->deferRelations($relMap);
+                    $fresh === null or $fresh[\spl_object_id($entity)] = true;
+                    $nodes === null or $nodes[] = $node;
                     $result[] = $entity;
                 }
             } catch (\TypeError $e) {
@@ -216,6 +305,26 @@ final class EntityFactory implements EntityFactoryInterface
 
             return $result;
         };
+    }
+
+    /**
+     * Sets a loaded relation like {@see RelationMap::init()} does, on a new entity or
+     * on a heap entity whose relation is still unresolved.
+     *
+     * @internal
+     */
+    public function attachLoadedRelation(string $role, object $entity, string $name, array $elements, bool $fresh): void
+    {
+        [, $relMap, $mapper] = $this->roles[$role] ??= $this->describe($role);
+        if (!$fresh) {
+            $fetched = $mapper->fetchRelations($entity);
+            if (\array_key_exists($name, $fetched) && !$fetched[$name] instanceof ReferenceInterface) {
+                return;
+            }
+        }
+        $relation = $relMap->getRelations()[$name];
+        $this->heap->get($entity)?->setRelation($name, $elements);
+        $mapper->hydrate($entity, [$name => $relation->collect($elements)]);
     }
 
     private function describe(string $role): array

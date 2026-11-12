@@ -315,6 +315,18 @@ abstract class AbstractLoader implements LoaderInterface
     }
 
     /**
+     * Loaders of the relations loaded with separate queries, by relation name.
+     *
+     * @internal
+     *
+     * @return array<non-empty-string, LoaderInterface>
+     */
+    public function getLoadedLoaders(): array
+    {
+        return $this->load;
+    }
+
+    /**
      * Indicates that loader loads data.
      */
     abstract public function isLoaded(): bool;

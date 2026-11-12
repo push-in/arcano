@@ -22,6 +22,7 @@ use Arcano\ORM\Service\EntityFactoryInterface;
 use Arcano\ORM\Service\MapperProviderInterface;
 use Arcano\ORM\Service\SourceProviderInterface;
 use Arcano\ORM\Select\JoinableLoader;
+use Arcano\ORM\Select\Loader\HasManyLoader;
 use Arcano\ORM\Select\QueryBuilder;
 use Arcano\ORM\Select\RootLoader;
 use Arcano\ORM\Select\ScopeInterface;
@@ -1015,7 +1016,10 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
 
         $maker = $this->rowMaker();
         if ($maker === null) {
-            return \iterator_to_array($this->getIterator(), false);
+            $eager = $this->eagerPlan();
+            return $eager === null
+                ? \iterator_to_array($this->getIterator(), false)
+                : $this->fetchEager(...$eager);
         }
 
         $statement = $this->addGroupByPK()->loader->buildQuery()->run();
@@ -1166,6 +1170,93 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         }
 
         return \count($slots) === \count($sentinels) ? [$query->getDriver(), $sql, $values, $slots, $maker] : false;
+    }
+
+    /**
+     * Root entities plus has-many relations loaded with plain POSTLOAD queries, all
+     * through row makers. Null when anything needs the parser.
+     */
+    private function eagerPlan(): ?array
+    {
+        if (!$this->entityFactory instanceof EntityFactory || $this->loader->getJoinedLoaders() !== []) {
+            return null;
+        }
+        $role = $this->loader->getTarget();
+        $parentMaker = $this->entityFactory->rowMaker($role, $this->loader->getColumnNames());
+        if ($parentMaker === null) {
+            return null;
+        }
+        $relations = [];
+        foreach ($this->loader->getLoadedLoaders() as $name => $loader) {
+            if (!$loader instanceof HasManyLoader || !$loader->isPlainPostload()) {
+                return null;
+            }
+            [$inner, $outer] = $loader->getRelationKeys();
+            $columns = $loader->getColumnNames();
+            if (\count($inner) !== 1 || \count($outer) !== 1 || !\in_array($outer[0], $columns, true)) {
+                return null;
+            }
+            $childMaker = $this->entityFactory->rowMaker($loader->getTarget(), $columns);
+            if ($childMaker === null) {
+                return null;
+            }
+            $relations[] = [$name, $loader, $childMaker, $inner[0], $outer[0]];
+        }
+
+        return $relations === [] ? null : [$role, $parentMaker, $relations];
+    }
+
+    /**
+     * @param list<array{string, HasManyLoader, \Closure, string, string}> $relations
+     */
+    private function fetchEager(string $role, \Closure $parentMaker, array $relations): array
+    {
+        $statement = $this->addGroupByPK()->loader->buildQuery()->run();
+        $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+        $statement->close();
+        $fresh = [];
+        $parentNodes = [];
+        $parents = $parentMaker($rows, $fresh, $parentNodes);
+
+        foreach ($relations as [$name, $loader, $childMaker, $inner, $outer]) {
+            // The parent keys, as the parser's reference index would give them.
+            $keys = [];
+            $parentKeys = [];
+            foreach ($parentNodes as $i => $node) {
+                $value = $node?->getData()[$inner] ?? null;
+                $parentKeys[$i] = $value;
+                $value === null or $keys[(string) $value] = $value;
+            }
+            $groups = [];
+            if ($keys !== []) {
+                $references = [];
+                foreach ($keys as $value) {
+                    $references[] = [$inner => $value];
+                }
+                $statement = $loader->buildPostloadQuery($references)->run();
+                $childNodes = [];
+                $notTracked = null;
+                $children = $childMaker($statement->fetchAll(StatementInterface::FETCH_NUM), $notTracked, $childNodes);
+                $statement->close();
+                foreach ($children as $i => $child) {
+                    $groups[(string) $childNodes[$i]->getData()[$outer]][] = $child;
+                }
+            }
+            foreach ($parents as $i => $parent) {
+                $value = $parentKeys[$i];
+                if ($value !== null) {
+                    $this->entityFactory->attachLoadedRelation(
+                        $role,
+                        $parent,
+                        $name,
+                        $groups[(string) $value] ?? [],
+                        isset($fresh[\spl_object_id($parent)]),
+                    );
+                }
+            }
+        }
+
+        return $parents;
     }
 
     /**

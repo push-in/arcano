@@ -9,6 +9,7 @@ use Arcano\Database\StatementInterface;
 use Arcano\ORM\Exception\LoaderException;
 use Arcano\ORM\FactoryInterface;
 use Arcano\ORM\Parser\AbstractNode;
+use Arcano\ORM\Relation;
 use Arcano\ORM\Service\SourceProviderInterface;
 use Arcano\ORM\SchemaInterface;
 use Arcano\ORM\Select\Loader\SubQueryLoader;
@@ -258,6 +259,55 @@ abstract class JoinableLoader extends AbstractLoader implements JoinableInterfac
     /**
      * Create relation specific select query.
      */
+    /**
+     * Loaded by its own query, with no nested relation, inheritance or custom query.
+     *
+     * @internal
+     */
+    public function isPlainPostload(): bool
+    {
+        return $this->getMethod() === self::POSTLOAD
+            && !$this->isJoined()
+            && $this->isLoaded()
+            && !$this->hasChildren()
+            && $this->inherit === null
+            && $this->options['using'] === null;
+    }
+
+    /**
+     * Inner (parent) and outer (own) key fields of the relation.
+     *
+     * @internal
+     *
+     * @return array{list<string>, list<string>}
+     */
+    public function getRelationKeys(): array
+    {
+        return [(array) ($this->schema[Relation::INNER_KEY] ?? []), (array) ($this->schema[Relation::OUTER_KEY] ?? [])];
+    }
+
+    /**
+     * Columns of the own query, in FETCH_NUM order.
+     *
+     * @internal
+     *
+     * @return non-empty-string[]
+     */
+    public function getColumnNames(): array
+    {
+        return $this->columnNames();
+    }
+
+    /**
+     * The query {@see loadData()} runs for the given parent key sets.
+     *
+     * @internal
+     */
+    public function buildPostloadQuery(array $references): SelectQuery
+    {
+        return $this->configureQuery($this->initQuery(), $references);
+    }
+
     protected function initQuery(): SelectQuery
     {
         return $this->source->getDatabase()->select()->from($this->getJoinTable());

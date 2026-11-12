@@ -968,7 +968,11 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             return $maker([$row])[0];
         }
 
-        // A root-only row: the parser would only name its columns.
+        // A root-only row: the parser would only name its columns. Drivers may append
+        // their own columns (SQL Server paging adds a row number).
+        if (\count($row) !== \count($columns)) {
+            $row = \array_slice($row, 0, \count($columns));
+        }
         return $this->entityFactory->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
     }
 

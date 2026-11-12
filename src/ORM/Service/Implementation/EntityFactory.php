@@ -303,7 +303,14 @@ final class EntityFactory implements EntityFactoryInterface
             : "\$n = new \\Arcano\\ORM\\Heap\\Node(\\Arcano\\ORM\\Heap\\Node::MANAGED, \$d, {$roleKey}, true);\n";
 
         // Entities from the heap or without a key take the generic path ($make).
-        $make = fn (array $row): object => $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
+        // Columns appended by the driver (SQL Server paging adds a row number) are dropped.
+        $width = \count($columns);
+        $make = fn (array $row): object => $this->make(
+            $role,
+            \array_combine($columns, \count($row) === $width ? $row : \array_slice($row, 0, $width)),
+            Node::MANAGED,
+            typecast: true,
+        );
 
         // Grouped results are only listed in $groups.
         $append = $groupBy === null ? "\$result[] = \$o;\n" : '';

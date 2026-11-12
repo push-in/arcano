@@ -303,14 +303,29 @@ final class EntityFactory implements EntityFactoryInterface
         // Entities from the heap or without a key take the generic path ($make).
         $make = fn (array $row): object => $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
 
+        // One entity per primary key, as the parser gives. A key seen twice is in the heap
+        // index by then, so with an indexed key the seen list is built on the first index hit.
+        if (\in_array($pk, $keys, true)) {
+            $seenInit = "\$seen = null;\n";
+            $seenCheck = '';
+            $seenHit = "if (\$seen === null) {\n\$seen = [];\nforeach (\$result as \$r) {\n"
+                . "\$k = \$heap->get(\$r)?->getData()[{$pkKey}] ?? null;\n"
+                . "\$k === null or \$seen[\\is_int(\$k) ? \$k : (string) \$k] = true;\n}\n}\n"
+                . "if (isset(\$seen[\$id])) {\ncontinue;\n}\n\$seen[\$id] = true;\n";
+            $seenMade = "\$seen === null or \$seen[\$id] = true;\n";
+        } else {
+            $seenInit = "\$seen = [];\n";
+            $seenCheck = "if (isset(\$seen[\$id])) {\ncontinue;\n}\n\$seen[\$id] = true;\n";
+            $seenHit = $seenMade = '';
+        }
+
         // $fresh collects the ids of the entities created here (not taken from the heap),
         // $nodes the heap node of each result.
         $maker = eval(<<<PHP
             declare(strict_types=1);
             return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype): array {
                 \$result = [];
-                \$seen = [];
-                \$storage = \$heap->loadedStorage();
+                {$seenInit}                \$storage = \$heap->loadedStorage();
                 \$index = &\$heap->loadedIndex({$roleKey});
                 try {
                     foreach (\$rows as \$row) {
@@ -322,13 +337,8 @@ final class EntityFactory implements EntityFactoryInterface
                         }
                         // Integer keys stay integers: the same array keys without a string per row.
                         \is_int(\$id) or \$id = (string) \$id;
-                        // Same as the parser: one entity per primary key.
-                        if (isset(\$seen[\$id])) {
-                            continue;
-                        }
-                        \$seen[\$id] = true;
-                        if (isset(\$index[{$pkKey}][\$id])) {
-                            \$result[] = \$o = \$make(\$row);
+                        {$seenCheck}if (isset(\$index[{$pkKey}][\$id])) {
+                            {$seenHit}                            \$result[] = \$o = \$make(\$row);
                             \$nodes === null or \$nodes[] = \$heap->get(\$o);
                             {$heapGroup}continue;
                         }
@@ -336,7 +346,7 @@ final class EntityFactory implements EntityFactoryInterface
                         {$newNode}                        \$o = clone \$prototype;
                         {$assign}\$o->__arcano_node = \$n;
                         \$storage[\$o] = \$n;
-                        {$index}{$defer}\$fresh === null or \$fresh[\\spl_object_id(\$o)] = true;
+                        {$index}{$defer}{$seenMade}\$fresh === null or \$fresh[\\spl_object_id(\$o)] = true;
                         \$nodes === null or \$nodes[] = \$n;
                         {$group}\$result[] = \$o;
                     }

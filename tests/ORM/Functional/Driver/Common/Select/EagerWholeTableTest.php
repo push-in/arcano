@@ -8,6 +8,7 @@ use Arcano\ORM\EntityManager;
 use Arcano\ORM\Mapper\Mapper;
 use Arcano\ORM\Relation;
 use Arcano\ORM\Schema;
+use Arcano\ORM\Service\EntityFactoryInterface;
 use Arcano\ORM\Tests\Fixtures\Comment;
 use Arcano\ORM\Tests\Fixtures\User;
 use Arcano\ORM\Tests\Functional\Driver\Common\BaseTest;
@@ -167,6 +168,21 @@ abstract class EagerWholeTableTest extends BaseTest
         $this->orm->getHeap()->clean();
         $user = $this->orm->getRepository(User::class)->findByPK(2);
         $this->assertSame(['msg 2', 'new'], $this->messages($user));
+    }
+
+    public function testRowMakerKeepsOneEntityPerKey(): void
+    {
+        $factory = $this->orm->getService(EntityFactoryInterface::class);
+        $maker = $factory->rowMaker('comment', ['id', 'user_id', 'message']);
+        $this->assertNotNull($maker);
+
+        $made = $maker([[1, 1, 'a'], [2, 1, 'b'], [1, 1, 'a'], [3, null, 'c'], [2, 1, 'b']]);
+        $this->assertSame(['a', 'b', 'c'], \array_map(static fn (Comment $c) => $c->message, $made));
+
+        // Entities already in the heap are returned once too.
+        $again = $maker([[4, 2, 'd'], [1, 1, 'x'], [4, 2, 'd'], [1, 1, 'x']]);
+        $this->assertCount(2, $again);
+        $this->assertSame($made[0], $again[1]);
     }
 
     private function texts(?iterable $comments): array

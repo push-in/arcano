@@ -230,7 +230,8 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
             throw ReadonlyConnectionException::onWriteStatementExecution();
         }
 
-        return $this->statement($query, $parameters)->rowCount();
+        $statement = $this->statement($query, $parameters);
+        return $statement instanceof Statement ? $statement->affectedRows() : $statement->rowCount();
     }
 
     /**

@@ -152,9 +152,19 @@ class InsertQuery extends ActiveQuery
         $params = new QueryParameters();
         $queryString = $this->sqlStatement($params);
 
+        return $this->runStatement($queryString, $params->getParameters());
+    }
+
+    /**
+     * Runs this query compiled as the given SQL with the given parameters.
+     *
+     * @internal
+     */
+    public function runStatement(string $queryString, array $parameters): mixed
+    {
         $this->driver->execute(
             $queryString,
-            $params->getParameters(),
+            $parameters,
         );
 
         $lastID = $this->driver->lastInsertID();

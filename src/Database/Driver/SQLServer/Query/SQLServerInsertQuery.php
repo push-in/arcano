@@ -16,7 +16,6 @@ use Arcano\Database\Driver\SQLServer\SQLServerDriver;
 use Arcano\Database\Exception\BuilderException;
 use Arcano\Database\Exception\ReadonlyConnectionException;
 use Arcano\Database\Injection\FragmentInterface;
-use Arcano\Database\Query\QueryParameters;
 use Arcano\Database\Query\ReturningInterface;
 use Arcano\Database\Query\InsertQuery;
 use Arcano\Database\Query\QueryInterface;
@@ -52,18 +51,20 @@ class SQLServerInsertQuery extends InsertQuery implements ReturningInterface
         return $this;
     }
 
-    public function run(): mixed
+    /**
+     * Runs this query compiled as the given SQL with the given parameters.
+     *
+     * @internal
+     */
+    public function runStatement(string $queryString, array $parameters): mixed
     {
         if ($this->returningColumns === []) {
-            return parent::run();
+            return parent::runStatement($queryString, $parameters);
         }
-
-        $params = new QueryParameters();
-        $queryString = $this->sqlStatement($params);
 
         $this->driver->isReadonly() and throw ReadonlyConnectionException::onWriteStatementExecution();
 
-        $result = $this->driver->query($queryString, $params->getParameters());
+        $result = $this->driver->query($queryString, $parameters);
 
         try {
             if (\count($this->returningColumns) === 1) {

@@ -7,7 +7,9 @@ namespace Arcano\ORM\Command\Database;
 use Arcano\Database\Database;
 use Arcano\Database\DatabaseInterface;
 use Arcano\Database\Injection\Parameter;
+use Arcano\Database\Query\InsertQuery;
 use Arcano\Database\Query\QueryParameters;
+use Arcano\Database\Query\ReturningInterface;
 
 /**
  * Statements compiled once per table and column set, so repeated writes skip
@@ -74,6 +76,100 @@ final class StatementPlans
         return $driver->execute($sql, $parameters);
     }
 
+    /**
+     * Runs the insert built as `$insert` (values `$values`, returning `$returning`) through
+     * a cached statement and returns its result as {@see InsertQuery::run()} does, or null
+     * in the first slot when the values need the query builder.
+     *
+     * @return array{bool, mixed}
+     */
+    public static function insert(DatabaseInterface $db, string $table, InsertQuery $insert, array $values, array $returning): array
+    {
+        if (!$db instanceof Database) {
+            return [false, null];
+        }
+        $key = "i\0{$table}\0" . \implode("\0", $returning) . "\2";
+        $args = [];
+        foreach ($values as $column => $value) {
+            if ($value === null) {
+                $key .= "{$column}\0n\1";
+                continue;
+            }
+            if (!\is_scalar($value)) {
+                return [false, null];
+            }
+            $key .= "{$column}\1";
+            $args[] = $value;
+        }
+
+        self::$plans ??= new \WeakMap();
+        $plans = self::$plans[$db] ??= new \ArrayObject();
+        $plan = $plans[$key] ?? null;
+        if ($plan === null) {
+            if (\count($plans) >= self::MAX_PLANS) {
+                return [false, null];
+            }
+            $plan = $plans[$key] = self::compileInsert($db, $table, $values, $returning);
+        }
+        if ($plan === false) {
+            return [false, null];
+        }
+
+        [$sql, $parameters, $slots] = $plan;
+        foreach ($slots as $i => $index) {
+            $parameters[$index] = new Parameter($args[$i]);
+        }
+
+        return [true, $insert->runStatement($sql, $parameters)];
+    }
+
+    private static function compileInsert(Database $db, string $table, array $values, array $returning): array|false
+    {
+        $sentinels = [];
+        foreach ($values as $column => $value) {
+            if ($value !== null) {
+                $values[$column] = $sentinels[] = "\0arcano-value-" . \count($sentinels) . "\0";
+            }
+        }
+        $query = $db->insert($table)->values($values);
+        if ($returning !== []) {
+            if (!$query instanceof ReturningInterface) {
+                return false;
+            }
+            $query->returning(...$returning);
+        }
+        $parameters = new QueryParameters();
+        $sql = $query->sqlStatement($parameters);
+
+        $slots = self::findSlots($parameters->getParameters(), $sentinels);
+        return $slots === null ? false : [$sql, $parameters->getParameters(), $slots];
+    }
+
+    /**
+     * Statement parameter index of each sentinel, or null when one is missing,
+     * repeated or not a plain parameter.
+     *
+     * @return array<int, int>|null
+     */
+    private static function findSlots(array $parameters, array $sentinels): ?array
+    {
+        $positions = \array_flip($sentinels);
+        $slots = [];
+        foreach ($parameters as $index => $parameter) {
+            $raw = $parameter instanceof Parameter ? $parameter->getValue() : $parameter;
+            if (!\is_string($raw) || !\str_contains($raw, "\0arcano-value-")) {
+                continue;
+            }
+            $slot = $positions[$raw] ?? null;
+            if ($slot === null || isset($slots[$slot]) || !$parameter instanceof Parameter) {
+                return null;
+            }
+            $slots[$slot] = $index;
+        }
+
+        return \count($slots) === \count($sentinels) ? $slots : null;
+    }
+
     private static function compileUpdate(DatabaseInterface $db, string $table, array $values, array $where): array|false
     {
         $sentinels = [];
@@ -89,22 +185,8 @@ final class StatementPlans
         $query = $db->update($table, $values, $where);
         $parameters = new QueryParameters();
         $sql = $query->sqlStatement($parameters);
-        $parameters = $parameters->getParameters();
 
-        $positions = \array_flip($sentinels);
-        $slots = [];
-        foreach ($parameters as $index => $parameter) {
-            $raw = $parameter instanceof Parameter ? $parameter->getValue() : $parameter;
-            if (!\is_string($raw) || !\str_contains($raw, "\0arcano-value-")) {
-                continue;
-            }
-            $slot = $positions[$raw] ?? null;
-            if ($slot === null || isset($slots[$slot]) || !$parameter instanceof Parameter) {
-                return false;
-            }
-            $slots[$slot] = $index;
-        }
-
-        return \count($slots) === \count($sentinels) ? [$query->getDriver(), $sql, $parameters, $slots] : false;
+        $slots = self::findSlots($parameters->getParameters(), $sentinels);
+        return $slots === null ? false : [$query->getDriver(), $sql, $parameters->getParameters(), $slots];
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Arcano\ORM\Command\Database;
 
 use Arcano\Database\DatabaseInterface;
+use Arcano\Database\Query\InsertQuery;
 use Arcano\Database\Query\ReturningInterface;
 use Arcano\ORM\Command\StoreCommand;
 use Arcano\ORM\Command\Traits\ErrorTrait;
@@ -98,9 +99,10 @@ final class Insert extends StoreCommand
         }
         $uncasted = $this->prepareData($uncasted);
 
+        $values = \array_merge($this->columns, $uncasted);
         $insert = $this->db
             ->insert($this->table)
-            ->values(\array_merge($this->columns, $uncasted));
+            ->values($values);
 
         if ($this->pkColumn !== null && $returningFields === []) {
             $returningFields[$this->primaryKeys[0]] ??= $this->pkColumn;
@@ -123,7 +125,7 @@ final class Insert extends StoreCommand
             // A non-empty returning list can only be built through the mapper above.
             \assert($this->mapper !== null);
 
-            $insertID = $insert->run();
+            $insertID = $this->runInsert($insert, $values, \array_values($returning));
 
             if (\count($returning) === 1) {
                 $field = \array_key_first($returning);
@@ -134,7 +136,7 @@ final class Insert extends StoreCommand
                 }
             }
         } else {
-            $insertID = $insert->run();
+            $insertID = $this->runInsert($insert, $values, \array_values($returning));
 
             if ($insertID !== null && \count($this->primaryKeys) === 1) {
                 $fpk = $this->primaryKeys[0]; // first PK
@@ -150,6 +152,13 @@ final class Insert extends StoreCommand
         $state->updateTransactionData();
 
         parent::execute();
+    }
+
+    private function runInsert(InsertQuery $insert, array $values, array $returning): mixed
+    {
+        [$done, $result] = StatementPlans::insert($this->db, $this->table, $insert, $values, $returning);
+
+        return $done ? $result : $insert->run();
     }
 
     public function register(string $key, mixed $value): void

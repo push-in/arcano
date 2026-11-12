@@ -14,6 +14,9 @@ use Arcano\ORM\RelationMap;
  */
 class ClosureHydrator
 {
+    /** @var array<class-string, \Closure> Field setters bound to each declaring class. */
+    private array $fieldSetters = [];
+
     /**
      * @param array<string, PropertyMap> $propertyMaps Array of class properties
      */
@@ -31,9 +34,10 @@ class ClosureHydrator
             }
         }
 
+        $relations = $relMap->getRelations();
         foreach ($data as $property => $value) {
             try {
-                if (isset($relMap->getRelations()[$property])) {
+                if (isset($relations[$property])) {
                     unset($object->{$property});
                 }
                 // Use @ to try to ignore deprecations
@@ -61,7 +65,7 @@ class ClosureHydrator
                 continue;
             }
 
-            \Closure::bind(static function (object $object, array $props, array &$data): void {
+            ($this->fieldSetters[$class] ??= \Closure::bind(static function (object $object, array $props, array &$data): void {
                 foreach ($props as $property) {
                     if (!\array_key_exists($property, $data)) {
                         continue;
@@ -80,13 +84,10 @@ class ClosureHydrator
                         }
                     }
                 }
-            }, null, $class)($object, $props, $data);
+            }, null, $class))($object, $props, $data);
         }
     }
 
-    /**
-     * Map private relations of non-proxy entity
-     */
     private function setRelationProperties(array $properties, RelationMap $relMap, object $object, array &$data): void
     {
         $refl = new \ReflectionClass($object);

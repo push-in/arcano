@@ -88,7 +88,7 @@ $schema = new Schema([
 $orm = new ORM(new Factory($dbal), $schema);
 $pdo = (fn () => $this->getPDO())->call($db->getDriver());
 
-function bench(string $name, callable $fn, int $repeat = 5): float
+function bench(string $name, callable $fn, int $repeat = 15): float
 {
     $fn(); // warm
     $times = [];
@@ -136,7 +136,7 @@ $results['insert'] = [
             $em->persist($u);
         }
         $em->run();
-    }, 3),
+    }, 7),
     bench('insert-pdo', function () use ($pdo) {
         $pdo->exec('DELETE FROM posts');
         $pdo->exec('DELETE FROM users');
@@ -151,7 +151,7 @@ $results['insert'] = [
             }
         }
         $pdo->commit();
-    }, 3),
+    }, 7),
 ];
 
 // fresh, stable data for read scenarios
@@ -261,7 +261,7 @@ $results['update'] = [
             $em->persist($u);
         }
         $em->run();
-    }, 3),
+    }, 7),
     bench('update-pdo', function () use ($pdo) {
         $rows = $pdo->query('SELECT id, name FROM users')->fetchAll(PDO::FETCH_ASSOC);
         $pdo->beginTransaction();
@@ -270,7 +270,7 @@ $results['update'] = [
             $st->execute([$r['name'] . '!', $r['id']]);
         }
         $pdo->commit();
-    }, 3),
+    }, 7),
 ];
 
 // 6. many small filtered queries (query building and compilation cost)

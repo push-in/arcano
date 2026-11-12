@@ -20,6 +20,13 @@ use Arcano\ORM\Service\RoleResolverInterface;
  */
 final class EntityFactory implements EntityFactoryInterface
 {
+    /**
+     * Per role: resolved role, relation map, mapper, primary key and heap indexes.
+     *
+     * @var array<string, array{string, \Arcano\ORM\RelationMap, \Arcano\ORM\MapperInterface, string|string[], array}>
+     */
+    private array $roles = [];
+
     public function __construct(
         private HeapInterface $heap,
         private SchemaInterface $schema,
@@ -37,16 +44,11 @@ final class EntityFactory implements EntityFactoryInterface
     ): object {
         $role = $data[LoaderInterface::ROLE_KEY] ?? $role;
         unset($data[LoaderInterface::ROLE_KEY]);
-        // Resolved role
-        $rRole = $this->roleResolver->resolveRole($role);
-        $relMap = $this->relationProvider->getRelationMap($rRole);
-        $mapper = $this->mapperProvider->getMapper($rRole);
+        [$rRole, $relMap, $mapper, $pk, $indexes] = $this->roles[$role] ??= $this->describe($role);
 
         $castedData = $typecast ? $mapper->cast($data) : $data;
 
         if ($status !== Node::NEW) {
-            // unique entity identifier
-            $pk = $this->schema->define($role, SchemaInterface::PRIMARY_KEY);
             if (\is_array($pk)) {
                 $ids = [];
                 foreach ($pk as $key) {
@@ -96,8 +98,21 @@ final class EntityFactory implements EntityFactoryInterface
         $e = $mapper->init($data, $role);
 
         /** Entity should be attached before {@see RelationMap::init()} running */
-        $this->heap->attach($e, $node, $this->indexProvider->getIndexes($rRole));
+        $this->heap->attach($e, $node, $indexes);
 
         return $mapper->hydrate($e, $relMap->init($this, $node, $castedData));
+    }
+
+    private function describe(string $role): array
+    {
+        $rRole = $this->roleResolver->resolveRole($role);
+
+        return [
+            $rRole,
+            $this->relationProvider->getRelationMap($rRole),
+            $this->mapperProvider->getMapper($rRole),
+            $this->schema->define($role, SchemaInterface::PRIMARY_KEY),
+            $this->indexProvider->getIndexes($rRole),
+        ];
     }
 }

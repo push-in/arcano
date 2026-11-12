@@ -25,6 +25,9 @@ class ProxyEntityFactory
     /** @var PropertyMap[] */
     private array $classProperties = [];
 
+    /** @var array<class-string, array{class-string, PropertyMap, list<array{\Closure, array}>}> */
+    private array $plans = [];
+
     private Instantiator $instantiator;
     private \Closure $initializer;
 
@@ -47,28 +50,18 @@ class ProxyEntityFactory
         RelationMap $relMap,
         string $sourceClass,
     ): object {
-        $class = \array_key_exists($sourceClass, $this->classMap)
-            ? $this->classMap[$sourceClass]
-            : $this->defineClass($sourceClass);
+        [$class, $relationProps, $initializers] = $this->plans[$sourceClass] ??= $this->plan($relMap, $sourceClass);
 
         $proxy = $this->instantiator->instantiate($class);
         $proxy->__cycle_orm_rel_map = $relMap;
-        $scopes = $this->getEntityProperties($proxy, $relMap);
-        $proxy->__cycle_orm_relation_props = $scopes[ClassPropertiesExtractor::KEY_RELATIONS];
-
-        // init
-        foreach ($scopes[ClassPropertiesExtractor::KEY_RELATIONS]->getProperties() as $scope => $properties) {
-            \Closure::bind($this->initializer, null, $scope === '' ? $class : $scope)($proxy, $properties);
+        $proxy->__cycle_orm_relation_props = $relationProps;
+        foreach ($initializers as [$initializer, $properties]) {
+            $initializer($proxy, $properties);
         }
 
         return $proxy;
     }
 
-    /**
-     * Sets an Entity's column values from data.
-     *
-     * @return object Entity with hydrated data
-     */
     public function upgrade(
         RelationMap $relMap,
         object $entity,
@@ -187,6 +180,26 @@ class ProxyEntityFactory
      * @return PropertyMap[]
      * @throws \ReflectionException
      */
+    /**
+     * Proxy class, relation property map and the scoped closures that unset
+     * relation properties so they resolve lazily, computed once per class.
+     */
+    private function plan(RelationMap $relMap, string $sourceClass): array
+    {
+        $class = \array_key_exists($sourceClass, $this->classMap)
+            ? $this->classMap[$sourceClass]
+            : $this->defineClass($sourceClass);
+        $scopes = $this->classProperties[$class] ??= $this->propertiesExtractor
+            ->extract($class, \array_keys($relMap->getRelations()));
+
+        $initializers = [];
+        foreach ($scopes[ClassPropertiesExtractor::KEY_RELATIONS]->getProperties() as $scope => $properties) {
+            $initializers[] = [\Closure::bind($this->initializer, null, $scope === '' ? $class : $scope), $properties];
+        }
+
+        return [$class, $scopes[ClassPropertiesExtractor::KEY_RELATIONS], $initializers];
+    }
+
     private function getEntityProperties(object $entity, RelationMap $relMap): array
     {
         return $this->classProperties[$entity::class] ??= $this->propertiesExtractor

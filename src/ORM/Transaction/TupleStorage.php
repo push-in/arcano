@@ -35,9 +35,12 @@ final class TupleStorage implements \IteratorAggregate, \Countable
         $cleaner->iterators = &$this->iterators;
         $this->iterators[\spl_object_id($cleaner)] = &$iterator;
 
-        while (\count($iterator) > 0) {
-            $tuple = \current($iterator);
-            unset($iterator[\key($iterator)]);
+        // By reference, so tuples attached or detached while iterating are seen.
+        // Taking the first element each time instead would rescan every hole the
+        // previous unsets left, which is quadratic in the number of tuples.
+        foreach ($iterator as $id => &$slot) {
+            $tuple = $slot;
+            unset($slot, $iterator[$id]);
             yield $tuple->entity => $tuple;
         }
     }

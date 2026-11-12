@@ -1196,7 +1196,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             if (\count($inner) !== 1 || \count($outer) !== 1 || !\in_array($outer[0], $columns, true)) {
                 return null;
             }
-            $childMaker = $this->entityFactory->rowMaker($loader->getTarget(), $columns);
+            $childMaker = $this->entityFactory->rowMaker($loader->getTarget(), $columns, $outer[0]);
             if ($childMaker === null) {
                 return null;
             }
@@ -1234,13 +1234,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                     $references[] = [$inner => $value];
                 }
                 $statement = $loader->buildPostloadQuery($references)->run();
-                $childNodes = [];
-                $notTracked = null;
-                $children = $childMaker($statement->fetchAll(StatementInterface::FETCH_NUM), $notTracked, $childNodes);
+                $notTracked = $noNodes = null;
+                $childMaker($statement->fetchAll(StatementInterface::FETCH_NUM), $notTracked, $noNodes, $groups);
                 $statement->close();
-                foreach ($children as $i => $child) {
-                    $groups[(string) $childNodes[$i]->getData()[$outer]][] = $child;
-                }
             }
             foreach ($parents as $i => $parent) {
                 $value = $parentKeys[$i];

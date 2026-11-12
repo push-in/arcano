@@ -140,10 +140,10 @@ final class EntityFactory implements EntityFactoryInterface
      *
      * @return null|\Closure(iterable<array>): list<object>
      */
-    public function rowMaker(string $role, array $columns): ?\Closure
+    public function rowMaker(string $role, array $columns, ?string $groupBy = null): ?\Closure
     {
-        return ($this->rowMakers[$role . "\0" . \implode("\0", $columns)] ??= $this->compileRowMaker($role, $columns) ?? false)
-            ?: null;
+        $key = $role . "\0" . \implode("\0", $columns) . "\1" . $groupBy;
+        return ($this->rowMakers[$key] ??= $this->compileRowMaker($role, $columns, $groupBy) ?? false) ?: null;
     }
 
     /**
@@ -247,10 +247,10 @@ final class EntityFactory implements EntityFactoryInterface
         };
     }
 
-    private function compileRowMaker(string $role, array $columns): ?\Closure
+    private function compileRowMaker(string $role, array $columns, ?string $groupBy): ?\Closure
     {
         $plan = $this->makerPlan($role, $columns);
-        if ($plan === null) {
+        if ($plan === null || ($groupBy !== null && !\in_array($groupBy, $columns, true))) {
             return null;
         }
         [$rRole, $relMap, $pk, $keys, $rules, [$prototype, $assign, $scope]] = $plan;
@@ -274,6 +274,13 @@ final class EntityFactory implements EntityFactoryInterface
         $pkKey = \var_export($pk, true);
         $roleKey = \var_export($rRole, true);
         $defer = $relMap->getRelations() !== [] ? "\$n->deferRelations(\$relMap);\n" : '';
+        // $groups lists the results by the value of $groupBy, as their nodes have it.
+        $group = $heapGroup = '';
+        if ($groupBy !== null) {
+            $groupKey = \var_export($groupBy, true);
+            $group = "\$groups[(string) \$d[{$groupKey}]][] = \$o;\n";
+            $heapGroup = "\$groups[(string) (\$heap->get(\$o)?->getData()[{$groupKey}] ?? null)][] = \$o;\n";
+        }
 
         // Entities from the heap or without a key take the generic path ($make).
         $make = fn (array $row): object => $this->make($role, \array_combine($columns, $row), Node::MANAGED, typecast: true);
@@ -282,7 +289,7 @@ final class EntityFactory implements EntityFactoryInterface
         // $nodes the heap node of each result.
         $maker = eval(<<<PHP
             declare(strict_types=1);
-            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null) use (\$heap, \$make, \$prototype, \$relMap): array {
+            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null) use (\$heap, \$make, \$prototype, \$relMap): array {
                 \$result = [];
                 \$seen = [];
                 \$storage = \$heap->loadedStorage();
@@ -293,7 +300,7 @@ final class EntityFactory implements EntityFactoryInterface
                         if (\$id === null) {
                             \$result[] = \$o = \$make(\$row);
                             \$nodes === null or \$nodes[] = \$heap->get(\$o);
-                            continue;
+                            {$heapGroup}continue;
                         }
                         \$id = (string) \$id;
                         // Same as the parser: one entity per primary key.
@@ -304,7 +311,7 @@ final class EntityFactory implements EntityFactoryInterface
                         if (isset(\$index[{$pkKey}][\$id])) {
                             \$result[] = \$o = \$make(\$row);
                             \$nodes === null or \$nodes[] = \$heap->get(\$o);
-                            continue;
+                            {$heapGroup}continue;
                         }
                         \$d = [{$build}];
                         \$n = new \\Arcano\\ORM\\Heap\\Node(\\Arcano\\ORM\\Heap\\Node::MANAGED, \$d, {$roleKey}, true);
@@ -313,7 +320,7 @@ final class EntityFactory implements EntityFactoryInterface
                         \$storage[\$o] = \$n;
                         {$index}{$defer}\$fresh === null or \$fresh[\\spl_object_id(\$o)] = true;
                         \$nodes === null or \$nodes[] = \$n;
-                        \$result[] = \$o;
+                        {$group}\$result[] = \$o;
                     }
                 } catch (\\TypeError \$e) {
                     throw new \\Arcano\\ORM\\Exception\\MapperException(

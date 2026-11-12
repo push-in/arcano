@@ -9,6 +9,7 @@ use Arcano\ORM\Exception\MapperException;
 use Arcano\ORM\Heap\Heap;
 use Arcano\ORM\Heap\HeapInterface;
 use Arcano\ORM\Heap\Node;
+use Arcano\ORM\Relation\HasMany;
 use Arcano\ORM\Mapper\Mapper;
 use Arcano\ORM\Reference\ReferenceInterface;
 use Arcano\ORM\Service\EntityFactoryInterface;
@@ -278,7 +279,9 @@ final class EntityFactory implements EntityFactoryInterface
         }
         $pkKey = \var_export($pk, true);
         $roleKey = \var_export($rRole, true);
-        $defer = $deferRelations && $relMap->getRelations() !== [] ? "\$n->deferRelations(\$relMap);\n" : '';
+        $defer = $deferRelations && $relMap->getRelations() !== []
+            ? ($scope === null ? "\$n->deferredRelations = \$relMap;\n" : "\$n->deferRelations(\$relMap);\n")
+            : '';
         // $groups lists the results by the value of $groupBy, as their nodes have it.
         $group = $heapGroup = $filter = '';
         if ($groupBy !== null) {
@@ -382,10 +385,11 @@ final class EntityFactory implements EntityFactoryInterface
             }
             // Entities of a loaded row maker: the property is declared and still set.
             $assign = $mapper->relationAssigner($name);
-            return static function (object $entity, Node $node, array $elements) use ($relation, $name, $assign): void {
+            $plain = $relation instanceof HasMany && $relation->collectsArrays();
+            return static function (object $entity, Node $node, array $elements) use ($relation, $name, $assign, $plain): void {
                 $node->setRelation($name, $elements);
                 try {
-                    $assign($entity, $relation->collect($elements));
+                    $assign($entity, $plain ? $elements : $relation->collect($elements));
                 } catch (\TypeError $e) {
                     throw new MapperException(
                         "Can't hydrate an entity because property and value types are incompatible.",

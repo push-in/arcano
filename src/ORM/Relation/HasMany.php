@@ -226,6 +226,18 @@ class HasMany extends AbstractRelation
     }
 
     /**
+     * Whether {@see collect()} returns arrays as they are.
+     *
+     * @internal
+     */
+    public function collectsArrays(): bool
+    {
+        return $this->factory->collection(
+            $this->schema[Relation::COLLECTION_TYPE] ?? null,
+        ) instanceof \Arcano\ORM\Collection\ArrayCollectionFactory;
+    }
+
+    /**
      * Convert entity data into array.
      */
     public function extract(mixed $data): array

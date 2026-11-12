@@ -1,0 +1,58 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Arcano\Database\Tests\Stub\Driver;
+
+use Arcano\Database\Driver\PDOInterface;
+use Arcano\Database\Exception\StatementException;
+use Arcano\Database\Exception\StatementException\ConnectionException;
+
+trait TestDriverTrait
+{
+    public int $disconnectCalls = 0;
+    public int $exceptionOnTransactionBegin = 0;
+
+    /** @var \Closure(\PDOStatement $pdo, ?array $params): bool|null */
+    public ?\Closure $queryCallback = null;
+
+    /**
+     * @param \Closure(\PDOStatement $pdo, ?array $params): bool $callback
+     */
+    public function setQueryCallback(\Closure $callback): void
+    {
+        $this->queryCallback = $callback;
+    }
+
+    public function disconnect(): void
+    {
+        ++$this->disconnectCalls;
+        parent::disconnect();
+    }
+
+    public function setDefaults(): void
+    {
+        $this->disconnectCalls = 0;
+        $this->exceptionOnTransactionBegin = 0;
+        $this->queryCallback = null;
+    }
+
+    protected function getPDO(): PDOInterface
+    {
+        $pdo = parent::getPDO();
+
+        return new TestPDO(
+            pdo: $pdo,
+            exceptionOnTransactionBegin: $this->exceptionOnTransactionBegin,
+            queryCallback: $this->queryCallback,
+        );
+    }
+
+    protected function mapException(\Throwable $exception, string $query): StatementException
+    {
+        if ($exception instanceof ConnectionException) {
+            return $exception;
+        }
+        return parent::mapException($exception, $query);
+    }
+}

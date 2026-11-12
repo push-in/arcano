@@ -1,0 +1,45 @@
+{
+    "name": "pushinbr/arcano",
+    "description": "Arcano: a fast data mapper ORM for PHP and the PAM runtime, derived from Cycle ORM.",
+    "license": "MIT",
+    "type": "library",
+    "require": {
+        "php": ">=8.4",
+        "ext-pdo": "*",
+        "doctrine/instantiator": "^1.3.1 || ^2.0",
+        "psr/log": "1 - 3",
+        "spiral/core": "^2.8 || ^3.0",
+        "spiral/pagination": "^2.8 || ^3.0",
+        "symfony/polyfill-php83": "^1.28"
+    },
+    "require-dev": {
+        "doctrine/collections": "^1.6 || ^2.0",
+        "illuminate/collections": "9 - 12",
+        "loophp/collection": "^6.0 || ^7.0",
+        "mockery/mockery": "^1.5",
+        "phpunit/phpunit": "^9.5",
+        "ramsey/uuid": "^4.0",
+        "roxblnfk/unpoly": "^1.8",
+        "spiral/tokenizer": "^2.14 || ^3.0",
+        "buggregator/trap": "^1.15"
+    },
+    "autoload": {
+        "psr-4": {
+            "Arcano\\ORM\\": "src/ORM/",
+            "Arcano\\Database\\": "src/Database/"
+        },
+        "files": [
+            "src/Database/polyfill.php",
+            "src/Database/functions_polyfill.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Arcano\\ORM\\Tests\\": "tests/ORM/",
+            "Arcano\\Database\\Tests\\": "tests/Database/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

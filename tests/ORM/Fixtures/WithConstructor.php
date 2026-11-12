@@ -1,0 +1,32 @@
+<?php
+
+// phpcs:ignoreFile
+declare(strict_types=1);
+
+namespace Arcano\ORM\Tests\Fixtures;
+
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
+
+class WithConstructor
+{
+    public $id;
+    public $email;
+
+    /** @var Collection|Post[] */
+    public $comments;
+
+    public $called;
+
+    public function __construct(string $email)
+    {
+        $this->email = $email;
+        $this->comments = new ArrayCollection();
+        $this->called = true;
+    }
+
+    public function getID()
+    {
+        return $this->id;
+    }
+}

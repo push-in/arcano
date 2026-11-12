@@ -62,6 +62,8 @@ final class Factory implements FactoryInterface
         $this->config = $config ?? RelationConfig::getDefault();
         $this->factory = $factory ?? new Container();
         $this->defaultCollectionFactory = $defaultCollectionFactory ?? new ArrayCollectionFactory();
+        // `collection: 'array'` keeps plain arrays whatever the default collection is.
+        $this->collectionFactoryAlias['array'] = new ArrayCollectionFactory();
     }
 
     public function make(

@@ -16,14 +16,13 @@ use Arcano\Database\Config\PDOConnectionConfig;
 /**
  * @psalm-type IsolationLevelType = \PDO::SQLSRV_TXN_*
  *
- * @psalm-import-type PDOFlag from PDOConnectionConfig
  */
 abstract class ConnectionConfig extends PDOConnectionConfig
 {
     /**
      * General driver specific PDO options.
      *
-     * @var array<PDOFlag, mixed>
+     * @var array<int, mixed>
      */
     protected const DEFAULT_PDO_OPTIONS = [
         \PDO::ATTR_CASE              => \PDO::CASE_NATURAL,

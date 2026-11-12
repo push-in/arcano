@@ -33,15 +33,13 @@ namespace Arcano\Database\Config;
  *  - SQLite   - sqlite:/path/to/database.db
  *  - SQLite   - sqlite::memory:
  *  - SQLite   - sqlite:
- *
- * @psalm-type PDOFlag = \PDO::ATTR_*
  */
 abstract class PDOConnectionConfig extends ConnectionConfig
 {
     /**
      * General driver specific PDO options.
      *
-     * @var array<PDOFlag, mixed>
+     * @var array<int, mixed>
      */
     protected const DEFAULT_PDO_OPTIONS = [
         \PDO::ATTR_CASE => \PDO::CASE_NATURAL,
@@ -52,7 +50,7 @@ abstract class PDOConnectionConfig extends ConnectionConfig
     /**
      * @param non-empty-string|null $user
      * @param non-empty-string|null $password
-     * @param array<PDOFlag, mixed> $options
+     * @param array<int, mixed> $options
      */
     public function __construct(
         ?string $user = null,
@@ -70,7 +68,7 @@ abstract class PDOConnectionConfig extends ConnectionConfig
     abstract public function getName(): string;
 
     /**
-     * @return array<PDOFlag, mixed>
+     * @return array<int, mixed>
      */
     public function getOptions(): array
     {

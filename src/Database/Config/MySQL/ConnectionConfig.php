@@ -13,15 +13,12 @@ namespace Arcano\Database\Config\MySQL;
 
 use Arcano\Database\Config\PDOConnectionConfig as BaseConnectionConfig;
 
-/**
- * @psalm-import-type PDOFlag from BaseConnectionConfig
- */
 abstract class ConnectionConfig extends BaseConnectionConfig
 {
     /**
      * General driver specific PDO options.
      *
-     * @var array<PDOFlag, mixed>
+     * @var array<int, mixed>
      */
     protected const DEFAULT_PDO_OPTIONS = [
         \PDO::ATTR_CASE => \PDO::CASE_NATURAL,
@@ -38,7 +35,7 @@ abstract class ConnectionConfig extends BaseConnectionConfig
     /**
      * @param non-empty-string|null $user
      * @param non-empty-string|null $password
-     * @param array<int, non-empty-string|non-empty-string> $options
+     * @param array<int, mixed> $options
      */
     public function __construct(
         ?string $user = null,

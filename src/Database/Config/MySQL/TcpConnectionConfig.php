@@ -27,7 +27,7 @@ class TcpConnectionConfig extends ConnectionConfig implements ProvidesSourceStri
      * @param non-empty-string|null $charset
      * @param non-empty-string|null $user
      * @param non-empty-string|null $password
-     * @param array<int, non-empty-string|non-empty-string> $options
+     * @param array<int, mixed> $options
      */
     public function __construct(
         public string $database,

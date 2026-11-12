@@ -1,3 +1,9 @@
-Arcano is derived from Cycle ORM (https://github.com/cycle/orm, v2.18.1) and
-Cycle Database (https://github.com/cycle/database, v2.23.3), both by
-Spiral Scout and released under the MIT License.
+Arcano is derived from the following Spiral Scout projects, all released under
+the MIT License:
+
+- Cycle ORM (https://github.com/cycle/orm, v2.18.1)
+- Cycle Database (https://github.com/cycle/database, v2.23.3)
+- Cycle Schema Builder (https://github.com/cycle/schema-builder, v2.12.2)
+- Cycle Annotated (https://github.com/cycle/annotated, v4.6.1)
+- Cycle Migrations (https://github.com/cycle/migrations, v4.3.0)
+- Cycle Schema Migrations Generator (https://github.com/cycle/schema-migrations-generator, v2.3.0)

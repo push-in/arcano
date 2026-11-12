@@ -1,0 +1,265 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Arcano\Schema\Tests\Relation;
+
+use Arcano\ORM\Relation;
+use Arcano\ORM\Schema;
+use Arcano\Schema\Compiler;
+use Arcano\Schema\Exception\RegistryException;
+use Arcano\Schema\Exception\SchemaException;
+use Arcano\Schema\Generator\GenerateRelations;
+use Arcano\Schema\Generator\RenderRelations;
+use Arcano\Schema\Generator\RenderTables;
+use Arcano\Schema\Registry;
+use Arcano\Schema\Relation\BelongsTo;
+use Arcano\Schema\Relation\HasMany;
+use Arcano\Schema\Relation\ManyToMany;
+use Arcano\Schema\Relation\RefersTo;
+use Arcano\Schema\Tests\BaseTest;
+use Arcano\Schema\Tests\Fixtures\Plain;
+use Arcano\Schema\Tests\Fixtures\User;
+
+abstract class HasManyRelationCompositePKTest extends BaseTest
+{
+    public function testGenerate(): void
+    {
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany');
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        (new GenerateRelations(['hasMany' => new HasMany()]))->run($r);
+
+        $this->assertInstanceOf(HasMany::class, $r->getRelation($u, 'plain'));
+    }
+
+    public function testPackSchema(): void
+    {
+        $c = new Compiler();
+
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany');
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        (new GenerateRelations(['hasMany' => new HasMany()]))->run($r);
+        $schema = $c->compile($r);
+
+        $this->assertArrayHasKey('user', $schema);
+        $this->assertSame(Relation::HAS_MANY, $schema['user'][Schema::RELATIONS]['plain'][Relation::TYPE]);
+
+        $this->assertArrayHasKey('plain', $schema['user'][Schema::RELATIONS]);
+
+        $this->assertArrayHasKey('plain', $schema);
+        $this->assertArrayHasKey('user_p_id', $schema['plain'][Schema::COLUMNS]);
+    }
+
+    public function testInconsistentAmountOfPKsShouldThrowAndException(): void
+    {
+        $this->expectException(RegistryException::class);
+        $this->expectExceptionMessage('Inconsistent amount of related fields. '
+            . 'Source entity: `user`; keys: `id`, `slug`. Target entity: `plain`; keys: `parent_id`.');
+
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany');
+
+        $u->getRelations()->get('plain')->getOptions()->set('outerKey', ['parent_id']);
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        $schema = (new Compiler())->compile($r, [
+            new GenerateRelations(['hasMany' => new HasMany()]),
+        ]);
+    }
+
+    public function testCustomKey(): void
+    {
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany');
+
+        $u->getRelations()->get('plain')->getOptions()->set('outerKey', ['parent_id', 'parent_slug']);
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        $schema = (new Compiler())->compile($r, [
+            new GenerateRelations(['hasMany' => new HasMany()]),
+        ]);
+
+        $this->assertArrayHasKey('user', $schema);
+        $this->assertArrayHasKey('plain', $schema['user'][Schema::RELATIONS]);
+
+        $this->assertArrayHasKey('plain', $schema);
+        $this->assertArrayHasKey('parent_id', $schema['plain'][Schema::COLUMNS]);
+        $this->assertArrayHasKey('parent_slug', $schema['plain'][Schema::COLUMNS]);
+    }
+
+    public function testRenderTable(): void
+    {
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany');
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        (new Compiler())->compile($r, [
+            new GenerateRelations(['hasMany' => new HasMany()]),
+            $t = new RenderTables(),
+            new RenderRelations(),
+        ]);
+
+        // RENDER!
+        $t->getReflector()->run();
+
+        $table = $this->getDriver()->getSchema('plain');
+        $this->assertTrue($table->exists());
+        $this->assertTrue($table->hasForeignKey(['user_p_id', 'user_p_slug']));
+    }
+
+    public function testRenderTableRedefined(): void
+    {
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany');
+
+        $u->getRelations()->get('plain')->getOptions()->set('outerKey', ['parent_id', 'parent_slug']);
+        $u->getRelations()->get('plain')->getOptions()->set('fkCreate', false);
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        (new Compiler())->compile($r, [
+            new GenerateRelations(['hasMany' => new HasMany()]),
+            $t = new RenderTables(),
+            new RenderRelations(),
+        ]);
+
+        // RENDER!
+        $t->getReflector()->run();
+
+        $table = $this->getDriver()->getSchema('plain');
+        $this->assertTrue($table->exists());
+        $this->assertTrue($table->hasColumn('parent_id'));
+        $this->assertTrue($table->hasColumn('parent_slug'));
+        $this->assertFalse($table->hasForeignKey(['parent_id', 'parent_slug']));
+    }
+
+    public function testInverseInvalidType(): void
+    {
+        $c = new Compiler();
+
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany')->setInverse('user', 'manyToMany');
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        $this->expectException(SchemaException::class);
+
+        (new GenerateRelations([
+            'hasMany' => new HasMany(),
+            'manyToMany' => new ManyToMany(),
+        ]))->run($r);
+    }
+
+    public function testInverseToBelongsTo(): void
+    {
+        $c = new Compiler();
+
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany')->setInverse('user', 'belongsTo');
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        (new GenerateRelations([
+            'hasMany' => new HasMany(),
+            'belongsTo' => new BelongsTo(),
+        ]))->run($r);
+        $schema = $c->compile($r);
+
+        $this->assertArrayHasKey('user', $schema['plain'][Schema::RELATIONS]);
+        $this->assertSame(Relation::BELONGS_TO, $schema['plain'][Schema::RELATIONS]['user'][Relation::TYPE]);
+
+        $this->assertSame(
+            'user',
+            $schema['plain'][Schema::RELATIONS]['user'][Relation::TARGET],
+        );
+
+        $this->assertSame(
+            ['p_id', 'p_slug'],
+            $schema['plain'][Schema::RELATIONS]['user'][Relation::SCHEMA][Relation::OUTER_KEY],
+        );
+
+        $this->assertSame(
+            ['user_p_id', 'user_p_slug'],
+            $schema['plain'][Schema::RELATIONS]['user'][Relation::SCHEMA][Relation::INNER_KEY],
+        );
+    }
+
+    public function testInverseToRefersTo(): void
+    {
+        $c = new Compiler();
+
+        $e = Plain::defineCompositePK();
+        $u = User::defineCompositePK();
+
+        $u->getRelations()->get('plain')->setType('hasMany')->setInverse('user', 'refersTo');
+
+        $r = new Registry($this->dbal);
+        $r->register($e)->linkTable($e, 'default', 'plain');
+        $r->register($u)->linkTable($u, 'default', 'user');
+
+        (new GenerateRelations([
+            'hasMany' => new HasMany(),
+            'refersTo' => new RefersTo(),
+        ]))->run($r);
+        $schema = $c->compile($r);
+
+        $this->assertArrayHasKey('user', $schema['plain'][Schema::RELATIONS]);
+        $this->assertSame(Relation::REFERS_TO, $schema['plain'][Schema::RELATIONS]['user'][Relation::TYPE]);
+
+        $this->assertSame(
+            'user',
+            $schema['plain'][Schema::RELATIONS]['user'][Relation::TARGET],
+        );
+
+        $this->assertSame(
+            ['p_id', 'p_slug'],
+            $schema['plain'][Schema::RELATIONS]['user'][Relation::SCHEMA][Relation::OUTER_KEY],
+        );
+
+        $this->assertSame(
+            ['user_p_id', 'user_p_slug'],
+            $schema['plain'][Schema::RELATIONS]['user'][Relation::SCHEMA][Relation::INNER_KEY],
+        );
+    }
+}

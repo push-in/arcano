@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Arcano\Annotated\Tests\Fixtures\Fixtures7;
+
+use Arcano\Annotated\Annotation\Column;
+use Arcano\Annotated\Annotation\Embeddable;
+use Arcano\Annotated\Annotation\Table;
+use Arcano\Annotated\Annotation\Table\Index;
+
+/**
+ * @Embeddable(role="address", columnPrefix="address_")
+ * @Table(indexes={@Index(columns={"zipcode"})})
+ */
+#[Embeddable(role: 'address', columnPrefix: 'address_')]
+#[Table(indexes: [
+    new Index(columns: ['zipcode']),
+])]
+class Address
+{
+    /** @Column(type="string") */
+    #[Column(type: 'string')]
+    protected $city;
+
+    /** @Column(type="string") */
+    #[Column(type: 'string')]
+    protected $country;
+
+    /** @Column(type="string") */
+    #[Column(type: 'string')]
+    protected $address;
+
+    /** @Column(type="int") */
+    #[Column(type: 'int')]
+    protected $zipcode;
+}

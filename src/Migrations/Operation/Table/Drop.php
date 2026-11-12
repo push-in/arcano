@@ -1,0 +1,28 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Arcano\Migrations\Operation\Table;
+
+use Arcano\Database\Driver\HandlerInterface;
+use Arcano\Migrations\CapsuleInterface;
+use Arcano\Migrations\Exception\Operation\TableException;
+use Arcano\Migrations\Operation\AbstractOperation;
+
+final class Drop extends AbstractOperation
+{
+    public function execute(CapsuleInterface $capsule): void
+    {
+        $schema = $capsule->getSchema($this->getTable());
+        $database = $this->database ?? '[default]';
+
+        if (!$schema->exists()) {
+            throw new TableException(
+                "Unable to drop table '{$database}'.'{$this->getTable()}', table does not exists",
+            );
+        }
+
+        $schema->declareDropped();
+        $schema->save(HandlerInterface::DO_ALL);
+    }
+}

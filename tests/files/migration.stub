@@ -1,0 +1,12 @@
+<?php
+
+class %s extends \Arcano\Migrations\Migration
+{
+    public function up()
+    {
+    }
+
+    public function down()
+    {
+    }
+}

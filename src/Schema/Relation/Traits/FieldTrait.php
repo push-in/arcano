@@ -1,0 +1,182 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Arcano\Schema\Relation\Traits;
+
+use Arcano\ORM\Relation;
+use Arcano\Schema\Definition\Entity;
+use Arcano\Schema\Definition\Field;
+use Arcano\Schema\Definition\Map\FieldMap;
+use Arcano\Schema\Exception\FieldException;
+use Arcano\Schema\Exception\RegistryException;
+use Arcano\Schema\Exception\RelationException;
+use Arcano\Schema\Relation\OptionSchema;
+use Arcano\Schema\Table\Column;
+
+trait FieldTrait
+{
+    protected function getField(Entity $entity, int $field): Field
+    {
+        try {
+            return $entity->getFields()->get($this->getOptions()->get($field));
+        } catch (FieldException $e) {
+            throw new RelationException(
+                sprintf(
+                    'Field `%s`.`%s` does not exists, referenced by `%s`',
+                    $entity->getRole() ?? 'unknown',
+                    $this->getOptions()->get($field),
+                    $this->source,
+                ),
+                $e->getCode(),
+                $e,
+            );
+        }
+    }
+
+    protected function getFields(Entity $entity, int $option): FieldMap
+    {
+        $fields = new FieldMap();
+        $keys = (array) $this->getOptions()->get($option);
+
+        foreach ($keys as $key) {
+            try {
+                $fields->set($key, $entity->getFields()->get($key));
+            } catch (FieldException $e) {
+                throw new RelationException(
+                    sprintf(
+                        'Field `%s`.`%s` does not exists, referenced by `%s`.',
+                        $entity->getRole() ?? 'unknown',
+                        $key,
+                        $this->source,
+                    ),
+                    $e->getCode(),
+                    $e,
+                );
+            }
+        }
+
+        return $fields;
+    }
+
+    protected function createRelatedFields(
+        Entity $source,
+        int $sourceKey,
+        Entity $target,
+        int $targetKey,
+    ): void {
+        $sourceFields = $this->getFields($source, $sourceKey);
+        $targetColumns = (array) $this->options->get($targetKey);
+
+        $sourceFieldNames = $sourceFields->getNames();
+
+        if (count($targetColumns) !== count($sourceFieldNames)) {
+            throw new RegistryException(
+                sprintf(
+                    'Inconsistent amount of related fields. '
+                    . 'Source entity: `%s`; keys: `%s`. Target entity: `%s`; keys: `%s`.',
+                    $source->getRole() ?? 'unknown',
+                    implode('`, `', $this->getFields($source, $sourceKey)->getColumnNames()),
+                    $target->getRole() ?? 'unknown',
+                    implode('`, `', $targetColumns),
+                ),
+            );
+        }
+
+        $fields = array_combine($targetColumns, $sourceFieldNames);
+
+        foreach ($fields as $targetColumn => $sourceFieldName) {
+            $sourceField = $sourceFields->get($sourceFieldName);
+            $this->ensureField(
+                $target,
+                $targetColumn,
+                $sourceField,
+                $this->options->get(Relation::NULLABLE),
+            );
+        }
+    }
+
+    /**
+     * This method tries to replace column names with property names in relations
+     */
+    protected function normalizeContextFields(
+        Entity $source,
+        Entity $target,
+        array $keys = ['innerKey', 'outerKey'],
+    ): void {
+        foreach ($keys as $key) {
+            $options = $this->options->getOptions();
+
+            if (!isset($options[$key])) {
+                continue;
+            }
+
+            $columns = (array) $options[$key];
+
+            foreach ($columns as $i => $column) {
+                $entity = $key === 'innerKey' ? $source : $target;
+
+                if ($entity->getFields()->hasColumn($column)) {
+                    $columns[$i] = $entity->getFields()->getKeyByColumnName($column);
+                }
+            }
+
+            $this->options = $this->options->withOptions([
+                $key => $columns,
+            ]);
+        }
+    }
+
+    /**
+     * @param non-empty-string $fieldName
+     */
+    protected function ensureField(Entity $target, string $fieldName, Field $outerField, bool $nullable = false): void
+    {
+        // ensure that field will be indexed in memory for fast references
+        $outerField->setReferenced(true);
+
+        if ($target->getFields()->has($fieldName)) {
+            $field = $target->getFields()->get($fieldName);
+
+            // A column shared by several relations (HasMany and its BelongsTo) must not depend
+            // on which relation is generated first; user-declared fields are kept as they are.
+            if ($nullable && $field->isRelationGenerated()) {
+                $field->getOptions()->set(Column::OPT_NULLABLE, true);
+            }
+
+            return;
+        }
+
+        $field = new Field();
+        $field->setRelationGenerated(true);
+        $field->setEntityClass($target->getClass());
+        $field->setColumn($fieldName);
+        $field->setTypecast($outerField->getTypecast());
+        // Copy attributes from outer to target
+        foreach ($outerField->getAttributes() as $k => $v) {
+            $field->getAttributes()->set($k, $v);
+        }
+
+        switch ($outerField->getType()) {
+            case 'primary':
+                $field->setType('int');
+                break;
+            case 'bigPrimary':
+                $field->setType('bigint');
+                break;
+            case 'smallPrimary':
+                $field->setType('smallint');
+                break;
+            default:
+                $field->setType($outerField->getType());
+        }
+
+        if ($nullable) {
+            $field->getOptions()->set(Column::OPT_NULLABLE, true);
+        }
+
+        $target->getFields()->set($fieldName, $field);
+    }
+
+    abstract protected function getOptions(): OptionSchema;
+}

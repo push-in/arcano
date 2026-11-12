@@ -8,18 +8,50 @@
         <testsuite name="unit">
             <directory>tests/ORM/Unit</directory>
             <directory>tests/Database/Unit</directory>
+            <directory>tests/Schema/Definition</directory>
+            <directory>tests/Schema/Exception</directory>
+            <directory>tests/Schema/Generator</directory>
+            <directory>tests/Schema/Relation</directory>
+            <file>tests/Schema/CompilerTest.php</file>
+            <file>tests/Schema/DefaultsTest.php</file>
+            <file>tests/Schema/EntityTest.php</file>
+            <file>tests/Schema/FieldsTest.php</file>
+            <directory>tests/Annotated/Unit</directory>
+            <directory>tests/Migrations/Unit</directory>
+            <file>tests/Migrations/ConfigTest.php</file>
+            <directory>tests/SchemaMigrations/Unit</directory>
         </testsuite>
         <testsuite name="sqlite">
             <directory>tests/ORM/Functional/Driver/SQLite</directory>
             <directory>tests/Database/Functional/Driver/SQLite</directory>
+            <directory>tests/Schema/Driver/SQLite</directory>
+            <directory>tests/Annotated/Functional/Driver/SQLite</directory>
+            <directory>tests/Migrations/SQLite</directory>
+            <directory>tests/SchemaMigrations/Functional/Driver/SQLite</directory>
         </testsuite>
         <testsuite name="mysql">
             <directory>tests/ORM/Functional/Driver/MySQL</directory>
             <directory>tests/Database/Functional/Driver/MySQL</directory>
+            <directory>tests/Schema/Driver/MySQL</directory>
+            <directory>tests/Annotated/Functional/Driver/MySQL</directory>
+            <directory>tests/Migrations/MySQL</directory>
+            <directory>tests/SchemaMigrations/Functional/Driver/MySQL</directory>
         </testsuite>
         <testsuite name="postgres">
             <directory>tests/ORM/Functional/Driver/Postgres</directory>
             <directory>tests/Database/Functional/Driver/Postgres</directory>
+            <directory>tests/Schema/Driver/Postgres</directory>
+            <directory>tests/Annotated/Functional/Driver/Postgres</directory>
+            <directory>tests/Migrations/Postgres</directory>
+            <directory>tests/SchemaMigrations/Functional/Driver/Postgres</directory>
+        </testsuite>
+        <testsuite name="sqlserver">
+            <directory>tests/ORM/Functional/Driver/SQLServer</directory>
+            <directory>tests/Database/Functional/Driver/SQLServer</directory>
+            <directory>tests/Schema/Driver/SQLServer</directory>
+            <directory>tests/Annotated/Functional/Driver/SQLServer</directory>
+            <directory>tests/Migrations/SQLServer</directory>
+            <directory>tests/SchemaMigrations/Functional/Driver/SQLServer</directory>
         </testsuite>
     </testsuites>
 </phpunit>

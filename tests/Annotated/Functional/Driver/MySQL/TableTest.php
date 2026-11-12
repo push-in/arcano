@@ -1,0 +1,78 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Arcano\Annotated\Tests\Functional\Driver\MySQL;
+
+// phpcs:ignore
+use Arcano\Annotated\Entities;
+use Arcano\Annotated\Locator\TokenizerEntityLocator;
+use Arcano\Annotated\MergeColumns;
+use Arcano\Annotated\Tests\Functional\Driver\Common\TableTestCase;
+use Arcano\Schema\Generator\RenderTables;
+use Arcano\Schema\Generator\SyncTables;
+use Arcano\Schema\Registry;
+use Spiral\Attributes\AttributeReader;
+
+/**
+ * @group driver
+ * @group driver-mysql
+ */
+final class TableTest extends TableTestCase
+{
+    public const DRIVER = 'mysql';
+
+    public function testUnsigned(): void
+    {
+        $reader = new AttributeReader();
+        $r = new Registry($this->dbal);
+        (new Entities(new TokenizerEntityLocator($this->locator, $reader), $reader))->run($r);
+        (new MergeColumns($reader))->run($r);
+        (new RenderTables())->run($r);
+
+        $schema = $r->getTableSchema($r->getEntity('label'));
+
+        $this->assertTrue($schema->column('unsigned')->isUnsigned());
+        $this->assertFalse($schema->column('simple')->isUnsigned());
+
+        $schema->save();
+
+        $this->assertTrue($this->dbal->database()->table('labels')->getSchema()->column('unsigned')->isUnsigned());
+        $this->assertFalse($this->dbal->database()->table('labels')->getSchema()->column('simple')->isUnsigned());
+    }
+
+    public function testZerofill(): void
+    {
+        $reader = new AttributeReader();
+        $r = new Registry($this->dbal);
+        (new Entities(new TokenizerEntityLocator($this->locator, $reader), $reader))->run($r);
+        (new MergeColumns($reader))->run($r);
+        (new RenderTables())->run($r);
+
+        $schema = $r->getTableSchema($r->getEntity('label'));
+
+        $this->assertTrue($schema->column('zerofill')->isZerofill());
+        $this->assertFalse($schema->column('simple')->isZerofill());
+
+        $schema->save();
+
+        $this->assertTrue($this->dbal->database()->table('labels')->getSchema()->column('zerofill')->isUnsigned());
+        $this->assertFalse($this->dbal->database()->table('labels')->getSchema()->column('simple')->isUnsigned());
+    }
+
+    public function testColumnCustomAttributes(): void
+    {
+        $reader = new AttributeReader();
+        $r = new Registry($this->dbal);
+        (new Entities(new TokenizerEntityLocator($this->locator, $reader), $reader))->run($r);
+        (new MergeColumns($reader))->run($r);
+        (new RenderTables())->run($r);
+        (new SyncTables())->run($r);
+
+        $dbSchema = $this->dbal->database()->table('labels')->getSchema();
+        $attributes = $dbSchema->column('charset_column')->getAttributes();
+
+        $this->assertSame('ascii', $attributes['charset']);
+        $this->assertSame('ascii_bin', $attributes['collation']);
+    }
+}

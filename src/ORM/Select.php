@@ -22,6 +22,7 @@ use Arcano\ORM\Service\EntityFactoryInterface;
 use Arcano\ORM\Service\MapperProviderInterface;
 use Arcano\ORM\Service\SourceProviderInterface;
 use Arcano\ORM\Select\JoinableLoader;
+use Arcano\ORM\RelationMap;
 use Arcano\ORM\Select\Loader\HasManyLoader;
 use Arcano\ORM\Select\QueryBuilder;
 use Arcano\ORM\Select\RootLoader;
@@ -1182,10 +1183,6 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             return null;
         }
         $role = $this->loader->getTarget();
-        $parentMaker = $this->entityFactory->rowMaker($role, $this->loader->getColumnNames());
-        if ($parentMaker === null) {
-            return null;
-        }
         $relations = [];
         foreach ($this->loader->getLoadedLoaders() as $name => $loader) {
             if (!$loader instanceof HasManyLoader || !$loader->isPlainPostload()) {
@@ -1197,19 +1194,27 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                 return null;
             }
             $childMaker = $this->entityFactory->rowMaker($loader->getTarget(), $columns, $outer[0]);
-            if ($childMaker === null) {
+            $setter = $this->entityFactory->freshRelationSetter($role, $name);
+            if ($childMaker === null || $setter === null) {
                 return null;
             }
-            $relations[] = [$name, $loader, $childMaker, $inner[0], $outer[0]];
+            $relations[] = [$name, $loader, $childMaker, $inner[0], $outer[0], $setter];
         }
+        if ($relations === []) {
+            return null;
+        }
+        // When every relation is loaded here, new parents defer references only for a missing key.
+        $relationMap = $this->entityFactory->relationMap($role);
+        $all = \count($relations) === \count($relationMap->getRelations());
+        $parentMaker = $this->entityFactory->rowMaker($role, $this->loader->getColumnNames(), deferRelations: !$all);
 
-        return $relations === [] ? null : [$role, $parentMaker, $relations];
+        return $parentMaker === null ? null : [$role, $parentMaker, $relations, $all ? $relationMap : null];
     }
 
     /**
-     * @param list<array{string, HasManyLoader, \Closure, string, string}> $relations
+     * @param list<array{string, HasManyLoader, \Closure, string, string, \Closure}> $relations
      */
-    private function fetchEager(string $role, \Closure $parentMaker, array $relations): array
+    private function fetchEager(string $role, \Closure $parentMaker, array $relations, ?RelationMap $undeferred): array
     {
         $query = $this->addGroupByPK()->loader->buildQuery();
         $whole = self::readsWholeTable($query);
@@ -1220,7 +1225,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $parentNodes = [];
         $parents = $parentMaker($rows, $fresh, $parentNodes);
 
-        foreach ($relations as [$name, $loader, $childMaker, $inner, $outer]) {
+        foreach ($relations as [$name, $loader, $childMaker, $inner, $outer, $setter]) {
             // The parent keys, as the parser's reference index would give them.
             $keys = [];
             $parentKeys = [];
@@ -1246,15 +1251,19 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             }
             foreach ($parents as $i => $parent) {
                 $value = $parentKeys[$i];
-                if ($value !== null) {
-                    $this->entityFactory->attachLoadedRelation(
+                if (!isset($fresh[\spl_object_id($parent)])) {
+                    $value === null or $this->entityFactory->attachLoadedRelation(
                         $role,
                         $parent,
                         $name,
                         $groups[(string) $value] ?? [],
-                        isset($fresh[\spl_object_id($parent)]),
+                        false,
                         $parentNodes[$i],
                     );
+                } elseif ($value !== null) {
+                    $setter($parent, $parentNodes[$i], $groups[(string) $value] ?? []);
+                } else {
+                    $undeferred === null or $parentNodes[$i]->deferRelations($undeferred);
                 }
             }
         }

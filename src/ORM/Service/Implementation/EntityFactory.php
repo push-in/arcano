@@ -140,10 +140,11 @@ final class EntityFactory implements EntityFactoryInterface
      *
      * @return null|\Closure(iterable<array>): list<object>
      */
-    public function rowMaker(string $role, array $columns, ?string $groupBy = null): ?\Closure
+    public function rowMaker(string $role, array $columns, ?string $groupBy = null, bool $deferRelations = true): ?\Closure
     {
-        $key = $role . "\0" . \implode("\0", $columns) . "\1" . $groupBy;
-        return ($this->rowMakers[$key] ??= $this->compileRowMaker($role, $columns, $groupBy) ?? false) ?: null;
+        $key = $role . "\0" . \implode("\0", $columns) . "\1" . $groupBy . ($deferRelations ? '' : "\2");
+        return ($this->rowMakers[$key] ??= $this->compileRowMaker($role, $columns, $groupBy, $deferRelations) ?? false)
+            ?: null;
     }
 
     /**
@@ -247,7 +248,10 @@ final class EntityFactory implements EntityFactoryInterface
         };
     }
 
-    private function compileRowMaker(string $role, array $columns, ?string $groupBy): ?\Closure
+    /**
+     * @param bool $deferRelations false when the caller sets every relation of the new entities
+     */
+    private function compileRowMaker(string $role, array $columns, ?string $groupBy, bool $deferRelations): ?\Closure
     {
         $plan = $this->makerPlan($role, $columns);
         if ($plan === null || ($groupBy !== null && !\in_array($groupBy, $columns, true))) {
@@ -273,7 +277,7 @@ final class EntityFactory implements EntityFactoryInterface
         }
         $pkKey = \var_export($pk, true);
         $roleKey = \var_export($rRole, true);
-        $defer = $relMap->getRelations() !== [] ? "\$n->deferRelations(\$relMap);\n" : '';
+        $defer = $deferRelations && $relMap->getRelations() !== [] ? "\$n->deferRelations(\$relMap);\n" : '';
         // $groups lists the results by the value of $groupBy, as their nodes have it.
         $group = $heapGroup = '';
         if ($groupBy !== null) {
@@ -334,6 +338,45 @@ final class EntityFactory implements EntityFactoryInterface
             PHP);
 
         return $scope === null ? $maker : \Closure::bind($maker, null, $scope);
+    }
+
+    /**
+     * @internal
+     */
+    public function relationMap(string $role): \Arcano\ORM\RelationMap
+    {
+        return ($this->roles[$role] ??= $this->describe($role))[1];
+    }
+
+    /**
+     * For new proxies of a role made by {@see rowMaker()}: sets a loaded relation on the node
+     * and the entity as {@see attachLoadedRelation()} does. Null when the entity class
+     * handles __unset() itself.
+     *
+     * @internal
+     *
+     * @return null|\Closure(object, Node, array): void
+     */
+    public function freshRelationSetter(string $role, string $name): ?\Closure
+    {
+        [, $relMap, $mapper, , , $proxies] = $this->roles[$role] ??= $this->describe($role);
+        $class = $this->schema->define($role, SchemaInterface::ENTITY);
+        if (!$proxies || !\is_string($class) || \method_exists($class, '__unset')) {
+            return null;
+        }
+        $relation = $relMap->getRelations()[$name];
+
+        return static function (object $entity, Node $node, array $elements) use ($relation, $name): void {
+            $node->setRelation($name, $elements);
+            try {
+                $entity->__set($name, $relation->collect($elements));
+            } catch (\TypeError $e) {
+                throw new MapperException(
+                    "Can't hydrate an entity because property and value types are incompatible.",
+                    previous: $e,
+                );
+            }
+        };
     }
 
     /**

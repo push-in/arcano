@@ -43,7 +43,7 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
 
     protected const DATETIME_MICROSECONDS = 'Y-m-d H:i:s.u';
 
-    protected ?\PDO $pdo = null;
+    protected \PDO|PDOInterface|null $pdo = null;
     protected int $transactionLevel = 0;
     protected HandlerInterface $schemaHandler;
     protected BuilderInterface $queryBuilder;

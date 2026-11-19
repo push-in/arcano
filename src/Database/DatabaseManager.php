@@ -134,10 +134,12 @@ final class DatabaseManager implements DatabaseProviderInterface, LoggerAwareInt
      */
     public function getDrivers(): array
     {
+        // Names only: building every configured driver here just to read its key made each call
+        // construct throwaway driver objects.
         $names = \array_unique(
             \array_merge(
                 \array_keys($this->drivers),
-                \array_keys($this->config->getDrivers()),
+                $this->config->getDriverNames(),
             ),
         );
 

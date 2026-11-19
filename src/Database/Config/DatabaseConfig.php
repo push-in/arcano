@@ -59,6 +59,19 @@ final class DatabaseConfig extends InjectableConfig
      *
      * @return DriverInterface[]
      */
+    /**
+     * The names of the configured drivers, without instantiating them.
+     *
+     * @return list<non-empty-string>
+     */
+    public function getDriverNames(): array
+    {
+        return \array_values(\array_map(
+            static fn (int|string $name): string => (string) $name,
+            \array_keys($this->config['connections'] ?? $this->config['drivers'] ?? []),
+        ));
+    }
+
     public function getDrivers(): array
     {
         $result = [];

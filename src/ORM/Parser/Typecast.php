@@ -63,6 +63,7 @@ final class Typecast implements CastableInterface, UncastableInterface
 
     public function setRules(array $rules): array
     {
+        $timezone = null;
         foreach ($rules as $key => $rule) {
             // Static rules
             if (\in_array($rule, self::RULES, true)) {
@@ -75,10 +76,11 @@ final class Typecast implements CastableInterface, UncastableInterface
                     'int' => static fn(mixed $value): int => (int) $value,
                     'bool' => static fn(mixed $value): bool => (bool) $value,
                     'float' => static fn(mixed $value): float => (float) $value,
-                    'datetime' => fn(mixed $value): \DateTimeImmutable => new \DateTimeImmutable(
-                        $value,
-                        $this->database->getDriver()->getTimezone(),
-                    ),
+                    // The driver timezone is fixed per connection: resolved once, not per value.
+                    'datetime' => function (mixed $value) use (&$timezone): \DateTimeImmutable {
+                        $timezone ??= $this->database->getDriver()->getTimezone();
+                        return new \DateTimeImmutable($value, $timezone);
+                    },
                     // Mostly an array, but can also be a scalar type.
                     'json' => static fn(mixed $value): mixed => \json_decode(
                         $value,

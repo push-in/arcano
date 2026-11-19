@@ -39,6 +39,9 @@ final class DatabaseManager implements DatabaseProviderInterface, LoggerAwareInt
     /** @var array<string, true> Drivers created from the config, closed with the manager. */
     private array $ownDrivers = [];
 
+    /** @var list<string>|null names of the configured drivers (the configuration does not change) */
+    private ?array $driverNames = null;
+
     private ?LoggerInterface $logger = null;
 
     public function __construct(
@@ -136,6 +139,21 @@ final class DatabaseManager implements DatabaseProviderInterface, LoggerAwareInt
     {
         // Names only: building every configured driver here just to read its key made each call
         // construct throwaway driver objects.
+        $configured = $this->driverNames ??= $this->config->getDriverNames();
+        if (\count($this->drivers) >= \count($configured)) {
+            // Every configured driver exists already (the usual case after the first request):
+            // the merge below would return exactly these, in this order.
+            $complete = true;
+            foreach ($configured as $name) {
+                if (!isset($this->drivers[$name])) {
+                    $complete = false;
+                    break;
+                }
+            }
+            if ($complete) {
+                return \array_values($this->drivers);
+            }
+        }
         $names = \array_unique(
             \array_merge(
                 \array_keys($this->drivers),

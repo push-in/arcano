@@ -56,6 +56,28 @@ abstract class SelectQueryTest extends BaseTest
         $this->assertSameParameters(['string', 'string'], $select);
     }
 
+    public function testScalarSubqueryColumnKeepsItsParameters(): void
+    {
+        $count = $this->db()->select('COUNT(*)')->from('table')->where('name', 'Antony');
+        $select = $this->db()
+            ->select('id', $count)
+            ->from('table')
+            ->where('value', '>', 10);
+
+        $this->assertSameQuery(
+            'SELECT {id}, (SELECT COUNT(*) FROM {table} WHERE {name} = ?) FROM {table} WHERE {value} > ?',
+            $select,
+        );
+        $this->assertSameParameters(['Antony', 10], $select);
+
+        // The compiled statement is cached by shape: other values are not baked into it.
+        $other = $this->db()
+            ->select('id', $this->db()->select('COUNT(*)')->from('table')->where('name', 'John'))
+            ->from('table')
+            ->where('value', '>', 20);
+        $this->assertSameParameters(['John', 20], $other);
+    }
+
     public function testSimpleWhere(): void
     {
         $select = $this->database->select()->from('table')->where('id', 1);

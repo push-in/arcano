@@ -622,14 +622,61 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     public function count(?string $column = null): int
     {
         $query = $this->buildQuery();
-        if ($column === null) {
-            $pk = (array) $this->loader->getPK();
-            $column = \count($pk) > 1 || self::rowsAreUnique($query)
-                ? '*'
-                : \sprintf('DISTINCT(%s)', \reset($pk));
+
+        return (int) $this->builder->withQuery($query)->count($column ?? $this->countColumn($query));
+    }
+
+    /**
+     * One page of entities and the number of rows of the whole query, as {@see count()} gives.
+     * For a select of a cached shape one statement reads both: the count is a scalar subquery
+     * column of the page query. Otherwise, or when the page is past the last row, the count
+     * is read by its own statement.
+     *
+     * @param int<0, max> $limit
+     * @param int<0, max> $offset
+     *
+     * @return array{list<TEntity>, int<0, max>}
+     */
+    public function fetchPage(int $limit, int $offset): array
+    {
+        if (!$this->customized && $this->limit === 0 && $this->offset === 0) {
+            $page = (clone $this)->limit($limit)->offset($offset);
+            $key = $page->shape . "\3count";
+            $plan = $this->shapes[$key] ?? null;
+            if ($plan === null && \count($this->shapes) < 1024) {
+                $plan = $this->shapes[$key] = $page->shapePlan($this);
+            }
+            if ($plan) {
+                [$driver, $sql, $values, $slots, $maker] = $plan;
+                foreach ($slots as $index => $i) {
+                    $values[$index] = new Parameter($this->shapeValues[$i]);
+                }
+                $statement = $driver->query($sql, $values);
+                $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+                $statement->close();
+                if ($rows !== []) {
+                    return [$maker($rows), (int) $rows[0][\array_key_last($rows[0])]];
+                }
+
+                return [[], (clone $this)->count()];
+            }
         }
 
-        return (int) $this->builder->withQuery($query)->count($column);
+        $items = (clone $this)->limit($limit)->offset($offset)->fetchAll();
+
+        return [\is_array($items) ? \array_values($items) : \iterator_to_array($items, false), (clone $this)->count()];
+    }
+
+    /**
+     * COUNT(*) when every row is a distinct entity, COUNT(DISTINCT pk) otherwise.
+     */
+    private function countColumn(SelectQuery $query): string
+    {
+        $pk = (array) $this->loader->getPK();
+
+        return \count($pk) > 1 || self::rowsAreUnique($query)
+            ? '*'
+            : \sprintf('DISTINCT(%s)', \reset($pk));
     }
 
     /**
@@ -1180,7 +1227,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             return null;
         }
         [$driver, $sql, $values, $slots, $maker] = $plan;
-        foreach ($slots as $i => $index) {
+        foreach ($slots as $index => $i) {
             $values[$index] = new Parameter($this->shapeValues[$i]);
         }
         $statement = $driver->query($sql, $values);
@@ -1194,7 +1241,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      * Compiles the recorded shape once with sentinel values and finds where each
      * value lands in the statement parameters. False when the shape can't be cached.
      */
-    private function shapePlan(): array|false
+    private function shapePlan(?self $countOf = null): array|false
     {
         // A scope adds its own values (a tenant, a soft-delete flag) when the query is built;
         // a cached statement would keep the first ones.
@@ -1215,9 +1262,21 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             return false;
         }
         $query = $copy->addGroupByPK()->loader->buildQuery();
+        if ($countOf !== null) {
+            // The count of the select without limit and offset, with the same values.
+            $counted = clone $countOf;
+            if (\count($counted->shapeValues) !== \count($sentinels)) {
+                return false;
+            }
+            $counted->shapeValues = $copy->shapeValues;
+            $counted->applyRecorded();
+            $countQuery = $counted->buildQuery();
+            $query->columns([...$query->getColumns(), $countQuery->countQuery($counted->countColumn($countQuery))]);
+        }
         $parameters = new QueryParameters();
         $sql = $query->sqlStatement($parameters);
         $values = $parameters->getParameters();
+        // Statement parameter index => shape value; a value may land in more than one place.
         $slots = [];
         foreach ($values as $index => $value) {
             $raw = $value instanceof ParameterInterface ? $value->getValue() : $value;
@@ -1225,13 +1284,13 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                 continue;
             }
             $slot = $sentinels[$raw] ?? null;
-            if ($slot === null || isset($slots[$slot]) || !$value instanceof Parameter) {
+            if ($slot === null || !$value instanceof Parameter) {
                 return false;
             }
-            $slots[$slot] = $index;
+            $slots[$index] = $slot;
         }
 
-        return \count($slots) === \count($sentinels) ? [$query->getDriver(), $sql, $values, $slots, $maker] : false;
+        return \count(\array_unique($slots)) === \count($sentinels) ? [$query->getDriver(), $sql, $values, $slots, $maker] : false;
     }
 
     /**

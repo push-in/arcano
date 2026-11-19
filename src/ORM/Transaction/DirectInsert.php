@@ -32,10 +32,24 @@ final class DirectInsert
     /** @var array<string, array|false> */
     private array $roles = [];
 
+    /**
+     * Role descriptions by ORM: they depend on the schema, mappers and sources only, so the
+     * unit of work of every request reuses them.
+     *
+     * @var \WeakMap<ORMInterface, array{array<class-string, string|false>, array<string, array|false>}>|null
+     */
+    private static ?\WeakMap $described = null;
+
     public function __construct(
         private ORMInterface $orm,
         private Heap $heap,
-    ) {}
+    ) {
+        self::$described ??= new \WeakMap();
+        if (isset(self::$described[$orm])) {
+            [$this->classRoles, $this->roles] = self::$described[$orm];
+        }
+    }
+
 
     /**
      * The insert of a new entity graph, or null when it needs the pool.
@@ -239,11 +253,16 @@ final class DirectInsert
         }
         $claimed[$id] = true;
 
-        $role = $this->classRoles[$entity::class] ??= $this->resolveRole($entity);
+        $role = $this->classRoles[$entity::class] ?? null;
+        if ($role === null || !isset($this->roles[$role !== false ? $role : ''])) {
+            $role = $this->classRoles[$entity::class] ??= $this->resolveRole($entity);
+            $role === false or $this->roles[$role] ??= $this->describe($role) ?? false;
+            self::$described[$this->orm] = [$this->classRoles, $this->roles];
+        }
         if ($role === false) {
             return null;
         }
-        $describe = $this->roles[$role] ??= $this->describe($role) ?? false;
+        $describe = $this->roles[$role];
 
         return $describe === false ? null : $describe;
     }

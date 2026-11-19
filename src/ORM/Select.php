@@ -1060,7 +1060,10 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     {
         if (!$this->customized && ($query === null || $query === [])) {
             // Same entity as below through the cached statement and row maker of the shape.
-            $rows = (clone $this)->limit(1)->fetchShape();
+            // Once the shape with `limit(1)` has a plan, it runs without cloning this select.
+            $rows = isset($this->shapes[$this->shape . "limit\0" . "1\1"])
+                ? $this->fetchShape("limit\0" . "1\1")
+                : (clone $this)->limit(1)->fetchShape();
             if ($rows !== null) {
                 return $rows[0] ?? null;
             }
@@ -1214,13 +1217,14 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      *
      * @return list<TEntity>|null
      */
-    private function fetchShape(): ?array
+    /** @param string $suffix recorded calls (no values) appended to this shape, already planned */
+    private function fetchShape(string $suffix = ''): ?array
     {
         if ($this->customized) {
             return null;
         }
-        $plan = $this->shapes[$this->shape] ?? null;
-        if ($plan === null && \count($this->shapes) < 1024) {
+        $plan = $this->shapes[$this->shape . $suffix] ?? null;
+        if ($plan === null && $suffix === '' && \count($this->shapes) < 1024) {
             $plan = $this->shapes[$this->shape] = $this->shapePlan();
         }
         if (!$plan) {

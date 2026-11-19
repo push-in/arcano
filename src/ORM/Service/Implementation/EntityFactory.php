@@ -166,6 +166,8 @@ final class EntityFactory implements EntityFactoryInterface
             || $rRole !== $role
             || $this->schema->define($role, SchemaInterface::PARENT) !== null
             || ($this->schema->define($role, SchemaInterface::CHILDREN) ?? []) !== []
+            // Joined-table subclasses: a row may belong to a subclass the maker doesn't build.
+            || $this->schema->getInheritedRoles($role) !== []
             || \count(\array_unique($fields)) !== \count($fields)
             || !\in_array($pk, $fields, true)
         ) {
@@ -215,11 +217,17 @@ final class EntityFactory implements EntityFactoryInterface
         }
 
         $items = [];
+        $casters = [];
         foreach (\array_intersect_key($rules, \array_flip($fields)) as $field => $rule) {
             $key = \var_export($field, true);
+            if ($rule instanceof \Closure) {
+                $casters[$field] = $rule;
+                $items[] = "\$d[{$key}] === null or \$d[{$key}] = \$casters[{$key}](\$d[{$key}]);";
+                continue;
+            }
             $items[] = "\$d[{$key}] === null or \$d[{$key}] = ({$rule}) \$d[{$key}];";
         }
-        $cast = eval("declare(strict_types=1);\nreturn static function (array \$d): array {\n" . \implode("\n", $items) . "\nreturn \$d;\n};");
+        $cast = eval("declare(strict_types=1);\nreturn static function (array \$d) use (\$casters): array {\n" . \implode("\n", $items) . "\nreturn \$d;\n};");
         $flip = \array_fill_keys($fields, true);
         $count = \count($fields);
         $heap = $this->heap;
@@ -267,10 +275,17 @@ final class EntityFactory implements EntityFactoryInterface
 
         // Typecast compiled into the array literal: null stays null, as in Typecast::cast().
         $items = [];
+        $casters = [];
         foreach ($columns as $i => $field) {
             $key = \var_export($field, true);
-            $items[] = isset($rules[$field])
-                ? "{$key} => \$row[{$i}] === null ? null : ({$rules[$field]}) \$row[{$i}]"
+            $rule = $rules[$field] ?? null;
+            if ($rule instanceof \Closure) {
+                $casters[$field] = $rule;
+                $items[] = "{$key} => \$row[{$i}] === null ? null : \$casters[{$key}](\$row[{$i}])";
+                continue;
+            }
+            $items[] = $rule !== null
+                ? "{$key} => \$row[{$i}] === null ? null : ({$rule}) \$row[{$i}]"
                 : "{$key} => \$row[{$i}]";
         }
         $build = \implode(', ', $items);
@@ -336,7 +351,7 @@ final class EntityFactory implements EntityFactoryInterface
         // $nodes the heap node of each result.
         $maker = eval(<<<PHP
             declare(strict_types=1);
-            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype): array {
+            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype, \$casters): array {
                 \$result = [];
                 {$seenInit}                \$storage = \$heap->loadedStorage();
                 \$index = &\$heap->loadedIndex({$roleKey});

@@ -310,8 +310,14 @@ final class UnitOfWork implements StateInterface
     private function runDirect(array $plan): StateInterface
     {
         $drivers = [];
-        $begin = static function (DatabaseInterface $db) use (&$drivers): void {
+        // A lone statement is atomic by itself: outside a transaction it runs in autocommit
+        // and saves the BEGIN and COMMIT round trips.
+        $single = self::singleStatement($plan);
+        $begin = static function (DatabaseInterface $db) use (&$drivers, $single): void {
             $driver = $db->getDriver();
+            if ($single && $driver->getTransactionLevel() === 0) {
+                return;
+            }
             if (!\in_array($driver, $drivers, true)) {
                 $driver->beginTransaction();
                 $drivers[] = $driver;
@@ -367,6 +373,19 @@ final class UnitOfWork implements StateInterface
         unset($this->orm, $this->runner, $this->pool, $this->commandGenerator, $this->directInsert);
 
         return $this;
+    }
+
+    /**
+     * Whether the direct plan writes exactly one row: one update, or one insert without children.
+     */
+    private static function singleStatement(array $plan): bool
+    {
+        if (\count($plan) !== 1) {
+            return false;
+        }
+        [$insert, $op] = \reset($plan);
+
+        return !$insert || $op[3] === [];
     }
 
     private function runCommand(?CommandInterface $command): void

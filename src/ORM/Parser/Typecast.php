@@ -49,7 +49,11 @@ final class Typecast implements CastableInterface, UncastableInterface
     /** @var array<non-empty-string, \Closure(mixed): mixed> */
     private array $uncasters = [];
 
-    /** @var array<non-empty-string, 'int'|'bool'|'float'> Rules that are a plain PHP cast. */
+    /**
+     * Rules that compiled makers can inline: a plain PHP cast, or the caster of a datetime.
+     *
+     * @var array<non-empty-string, 'int'|'bool'|'float'|\Closure(mixed): mixed>
+     */
     private array $plain = [];
 
     /**
@@ -67,11 +71,6 @@ final class Typecast implements CastableInterface, UncastableInterface
         foreach ($rules as $key => $rule) {
             // Static rules
             if (\in_array($rule, self::RULES, true)) {
-                if ($rule === 'int' || $rule === 'bool' || $rule === 'float') {
-                    $this->plain[$key] = $rule;
-                } else {
-                    unset($this->plain[$key]);
-                }
                 $this->casters[$key] = match ($rule) {
                     'int' => static fn(mixed $value): int => (int) $value,
                     'bool' => static fn(mixed $value): bool => (bool) $value,
@@ -89,6 +88,15 @@ final class Typecast implements CastableInterface, UncastableInterface
                         \JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE,
                     ),
                 };
+
+                if ($rule === 'int' || $rule === 'bool' || $rule === 'float') {
+                    $this->plain[$key] = $rule;
+                } elseif ($rule === 'datetime') {
+                    // Database timestamps always parse: the maker calls the caster directly.
+                    $this->plain[$key] = $this->casters[$key];
+                } else {
+                    unset($this->plain[$key]);
+                }
 
                 if ($rule === 'json') {
                     $this->uncasters[$key] = static fn(mixed $value): string => \json_encode(
@@ -158,12 +166,12 @@ final class Typecast implements CastableInterface, UncastableInterface
     }
 
     /**
-     * The rules as plain casts (`int`, `bool`, `float`) when every rule is one,
-     * so callers can compile them; null otherwise.
+     * The rules as plain casts (`int`, `bool`, `float`) or datetime casters when every
+     * rule is one, so callers can compile them; null otherwise.
      *
      * @internal
      *
-     * @return array<non-empty-string, 'int'|'bool'|'float'>|null
+     * @return array<non-empty-string, 'int'|'bool'|'float'|\Closure(mixed): mixed>|null
      */
     public function plainRules(): ?array
     {

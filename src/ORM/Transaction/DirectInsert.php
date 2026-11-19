@@ -50,6 +50,10 @@ final class DirectInsert
             return null;
         }
         $fields = $root['mapper']->fetchFields($entity);
+        if ($fields === []) {
+            // Nothing to write: the command generator decides between an empty insert and no write.
+            return null;
+        }
 
         $slaves = [];
         if ($cascade && $root['slaves'] !== []) {

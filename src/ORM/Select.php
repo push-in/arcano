@@ -186,6 +186,15 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function wherePK(string|int|array|object ...$ids): self
     {
+        if (!$this->customized && \count($ids) === 1) {
+            $id = \reset($ids);
+            // One scalar key on a single-column primary key is a plain where(): recorded, so
+            // fetchOne() and fetchAll() can run the cached statement of the shape.
+            $pk = (\is_int($id) || \is_string($id)) ? ($this->deferred[0] ?? $this->loader)->getPrimaryFields() : [];
+            if (\count($pk) === 1) {
+                return $this->where(\reset($pk), $id);
+            }
+        }
         $this->customized = true;
         $pk = $this->loader->getPrimaryFields();
 
@@ -607,20 +616,39 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     /**
      * Attention, column will be quoted by driver!
      *
-     * @param non-empty-string|null $column When column is null DISTINCT(PK) will be generated.
+     * @param non-empty-string|null $column When column is null DISTINCT(PK) will be generated, or COUNT(*)
+     *        when the query has no join, grouping or DISTINCT that could repeat a primary key.
      */
     public function count(?string $column = null): int
     {
+        $query = $this->buildQuery();
         if ($column === null) {
             $pk = (array) $this->loader->getPK();
-            $column = \count($pk) > 1
+            $column = \count($pk) > 1 || self::rowsAreUnique($query)
                 ? '*'
                 : \sprintf('DISTINCT(%s)', \reset($pk));
         }
 
-        return (int) $this->builder->withQuery(
-            $this->buildQuery(),
-        )->count($column);
+        return (int) $this->builder->withQuery($query)->count($column);
+    }
+
+    /**
+     * Every row of a single-table query without joins, grouping or set operations is a distinct
+     * entity, so COUNT(*) equals COUNT(DISTINCT pk) and skips the sort or hash of the primary keys.
+     */
+    private static function rowsAreUnique(SelectQuery $query): bool
+    {
+        $tokens = $query->getTokens();
+
+        return \count($tokens['from']) === 1
+            && \is_string(\reset($tokens['from']))
+            && $tokens['join'] === []
+            && $tokens['distinct'] === false
+            && $tokens['groupBy'] === []
+            && $tokens['having'] === []
+            && $tokens['union'] === []
+            && $tokens['intersect'] === []
+            && $tokens['except'] === [];
     }
 
     /**
@@ -983,6 +1011,13 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function fetchOne(?array $query = null): ?object
     {
+        if (!$this->customized && ($query === null || $query === [])) {
+            // Same entity as below through the cached statement and row maker of the shape.
+            $rows = (clone $this)->limit(1)->fetchShape();
+            if ($rows !== null) {
+                return $rows[0] ?? null;
+            }
+        }
         $select = (clone $this)->where($query)->limit(1);
         $data = $select->loadData();
 
@@ -1001,22 +1036,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function fetchAll(): iterable
     {
-        if (!$this->customized) {
-            $plan = $this->shapes[$this->shape] ?? null;
-            if ($plan === null && \count($this->shapes) < 1024) {
-                $plan = $this->shapes[$this->shape] = $this->shapePlan();
-            }
-            if ($plan) {
-                [$driver, $sql, $values, $slots, $maker] = $plan;
-                foreach ($slots as $i => $index) {
-                    $values[$index] = new Parameter($this->shapeValues[$i]);
-                }
-                $statement = $driver->query($sql, $values);
-                $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
-                $statement->close();
-
-                return $maker($rows);
-            }
+        $entities = $this->fetchShape();
+        if ($entities !== null) {
+            return $entities;
         }
 
         $maker = $this->rowMaker();
@@ -1140,11 +1162,46 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     }
 
     /**
+     * Runs the cached statement of the recorded shape; null when the select was customized
+     * or its shape can't be cached.
+     *
+     * @return list<TEntity>|null
+     */
+    private function fetchShape(): ?array
+    {
+        if ($this->customized) {
+            return null;
+        }
+        $plan = $this->shapes[$this->shape] ?? null;
+        if ($plan === null && \count($this->shapes) < 1024) {
+            $plan = $this->shapes[$this->shape] = $this->shapePlan();
+        }
+        if (!$plan) {
+            return null;
+        }
+        [$driver, $sql, $values, $slots, $maker] = $plan;
+        foreach ($slots as $i => $index) {
+            $values[$index] = new Parameter($this->shapeValues[$i]);
+        }
+        $statement = $driver->query($sql, $values);
+        $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
+        $statement->close();
+
+        return $maker($rows);
+    }
+
+    /**
      * Compiles the recorded shape once with sentinel values and finds where each
      * value lands in the statement parameters. False when the shape can't be cached.
      */
     private function shapePlan(): array|false
     {
+        // A scope adds its own values (a tenant, a soft-delete flag) when the query is built;
+        // a cached statement would keep the first ones.
+        $role = ($this->deferred[0] ?? $this->loader)->getTarget();
+        if ($this->schema->define($role, SchemaInterface::SCOPE) !== null) {
+            return false;
+        }
         $copy = clone $this;
         $sentinels = [];
         foreach ($copy->shapeValues as $i => $_) {
@@ -1318,6 +1375,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $tokens = $query->getTokens();
 
         return \count($tokens['from']) === 1
+            && \is_string(\reset($tokens['from']))
             && $tokens['join'] === []
             && $tokens['where'] === []
             && $tokens['having'] === []

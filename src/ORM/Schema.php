@@ -184,6 +184,11 @@ final class Schema implements SchemaInterface
             }
 
             unset($item[self::ROLE]);
+            // A one-column key compiled as a list is the same key; the string form keeps the
+            // single-key fast paths (compiled row makers, direct inserts and updates) available.
+            if (\is_array($item[self::PRIMARY_KEY] ?? null) && \count($item[self::PRIMARY_KEY]) === 1) {
+                $item[self::PRIMARY_KEY] = \reset($item[self::PRIMARY_KEY]);
+            }
             $result[$role] = $item;
         }
 

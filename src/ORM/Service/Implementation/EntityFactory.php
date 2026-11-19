@@ -283,13 +283,21 @@ final class EntityFactory implements EntityFactoryInterface
         $items = [];
         $casters = [];
         $zones = [];
+        $prototypes = [];
         foreach ($columns as $i => $field) {
             $key = \var_export($field, true);
             $rule = $rules[$field] ?? null;
             if ($rule instanceof \DateTimeZone) {
                 // The datetime rule ({@see \Arcano\ORM\Parser\Typecast}) without a call per value.
                 $zones[$field] = $rule;
-                $items[] = "{$key} => \$row[{$i}] === null ? null : new \\DateTimeImmutable(\$row[{$i}], \$zones[{$key}])";
+                $construct = "new \\DateTimeImmutable(\$row[{$i}], \$zones[{$key}])";
+                if ($rule->getName() === 'UTC' && \function_exists('pam_native_utc_datetime')) {
+                    // On the PAM runtime a UTC database timestamp is a filled-in clone of a
+                    // prototype: the same object the constructor gives, without its parser.
+                    $prototypes[$field] = new \DateTimeImmutable('2000-01-01 00:00:00', $rule);
+                    $construct = "(\\is_string(\$row[{$i}]) && (\$t = \\pam_native_utc_datetime(\$row[{$i}], \$prototypes[{$key}])) !== null ? \$t : {$construct})";
+                }
+                $items[] = "{$key} => \$row[{$i}] === null ? null : {$construct}";
                 continue;
             }
             if ($rule instanceof \Closure) {
@@ -364,7 +372,7 @@ final class EntityFactory implements EntityFactoryInterface
         // $nodes the heap node of each result.
         $maker = eval(<<<PHP
             declare(strict_types=1);
-            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype, \$casters, \$zones): array {
+            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype, \$casters, \$zones, \$prototypes): array {
                 \$result = [];
                 {$seenInit}                \$storage = \$heap->loadedStorage();
                 \$index = &\$heap->loadedIndex({$roleKey});

@@ -14,7 +14,8 @@ use Arcano\Database\Query\ReturningInterface;
 
 /**
  * Statements compiled once per table and column set, so repeated writes skip
- * the query builder and the compiler. Only scalar and null values qualify.
+ * the query builder and the compiler. Only scalar, datetime and null values qualify
+ * (a datetime is bound as the driver formats it, like the query builder does).
  *
  * @internal
  */
@@ -41,7 +42,7 @@ final class StatementPlans
                 $key .= "{$column}\0n\1";
                 continue;
             }
-            if (!\is_scalar($value)) {
+            if (!\is_scalar($value) && !$value instanceof \DateTimeInterface) {
                 return null;
             }
             $key .= "{$column}\1";
@@ -49,7 +50,7 @@ final class StatementPlans
         }
         $key .= "\2";
         foreach ($where as $column => $value) {
-            if (!\is_scalar($value)) {
+            if (!\is_scalar($value) && !$value instanceof \DateTimeInterface) {
                 return null;
             }
             $key .= "{$column}\1";
@@ -108,7 +109,7 @@ final class StatementPlans
                 $key .= "{$column}\0n\1";
                 continue;
             }
-            if (!\is_scalar($value)) {
+            if (!\is_scalar($value) && !$value instanceof \DateTimeInterface) {
                 return [false, null];
             }
             $key .= "{$column}\1";

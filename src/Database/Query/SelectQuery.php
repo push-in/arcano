@@ -330,13 +330,11 @@ class SelectQuery extends ActiveQuery implements
     }
 
     /**
-     * Count number of rows in query. Limit, offset, order by, group by values will be ignored.
+     * The query {@see count()} runs: a copy selecting only the count, without order or grouping.
      *
-     * @param non-empty-string $column Column to count by (every column by default).
-     *
-     * @return int<0, max>
+     * @param non-empty-string $column
      */
-    public function count(string $column = '*', bool $distinct = false): int
+    public function countQuery(string $column = '*', bool $distinct = false): self
     {
         $select = clone $this;
 
@@ -347,7 +345,19 @@ class SelectQuery extends ActiveQuery implements
         $select->orderBy = [];
         $select->groupBy = [];
 
-        $st = $select->run();
+        return $select;
+    }
+
+    /**
+     * Count number of rows in query. Limit, offset, order by, group by values will be ignored.
+     *
+     * @param non-empty-string $column Column to count by (every column by default).
+     *
+     * @return int<0, max>
+     */
+    public function count(string $column = '*', bool $distinct = false): int
+    {
+        $st = $this->countQuery($column, $distinct)->run();
         try {
             return (int) $st->fetchColumn();
         } finally {

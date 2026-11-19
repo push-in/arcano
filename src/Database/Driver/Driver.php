@@ -52,6 +52,8 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
     protected array $queryCache = [];
 
     private ?string $name = null;
+    private ?\DateTimeZone $timezone = null;
+    private ?string $timezoneName = null;
     private bool $useCache = true;
 
     protected function __construct(
@@ -132,7 +134,13 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
 
     public function getTimezone(): \DateTimeZone
     {
-        return new \DateTimeZone($this->config->timezone);
+        // DateTimeZone has no mutators: one instance per configured name.
+        if ($this->timezone === null || $this->timezoneName !== $this->config->timezone) {
+            $this->timezone = new \DateTimeZone($this->config->timezone);
+            $this->timezoneName = $this->config->timezone;
+        }
+
+        return $this->timezone;
     }
 
     public function getSchemaHandler(): HandlerInterface

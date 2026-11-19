@@ -218,8 +218,14 @@ final class EntityFactory implements EntityFactoryInterface
 
         $items = [];
         $casters = [];
+        $zones = [];
         foreach (\array_intersect_key($rules, \array_flip($fields)) as $field => $rule) {
             $key = \var_export($field, true);
+            if ($rule instanceof \DateTimeZone) {
+                $zones[$field] = $rule;
+                $items[] = "\$d[{$key}] === null or \$d[{$key}] = new \\DateTimeImmutable(\$d[{$key}], \$zones[{$key}]);";
+                continue;
+            }
             if ($rule instanceof \Closure) {
                 $casters[$field] = $rule;
                 $items[] = "\$d[{$key}] === null or \$d[{$key}] = \$casters[{$key}](\$d[{$key}]);";
@@ -227,7 +233,7 @@ final class EntityFactory implements EntityFactoryInterface
             }
             $items[] = "\$d[{$key}] === null or \$d[{$key}] = ({$rule}) \$d[{$key}];";
         }
-        $cast = eval("declare(strict_types=1);\nreturn static function (array \$d) use (\$casters): array {\n" . \implode("\n", $items) . "\nreturn \$d;\n};");
+        $cast = eval("declare(strict_types=1);\nreturn static function (array \$d) use (\$casters, \$zones): array {\n" . \implode("\n", $items) . "\nreturn \$d;\n};");
         $flip = \array_fill_keys($fields, true);
         $count = \count($fields);
         $heap = $this->heap;
@@ -276,9 +282,16 @@ final class EntityFactory implements EntityFactoryInterface
         // Typecast compiled into the array literal: null stays null, as in Typecast::cast().
         $items = [];
         $casters = [];
+        $zones = [];
         foreach ($columns as $i => $field) {
             $key = \var_export($field, true);
             $rule = $rules[$field] ?? null;
+            if ($rule instanceof \DateTimeZone) {
+                // The datetime rule ({@see \Arcano\ORM\Parser\Typecast}) without a call per value.
+                $zones[$field] = $rule;
+                $items[] = "{$key} => \$row[{$i}] === null ? null : new \\DateTimeImmutable(\$row[{$i}], \$zones[{$key}])";
+                continue;
+            }
             if ($rule instanceof \Closure) {
                 $casters[$field] = $rule;
                 $items[] = "{$key} => \$row[{$i}] === null ? null : \$casters[{$key}](\$row[{$i}])";
@@ -351,7 +364,7 @@ final class EntityFactory implements EntityFactoryInterface
         // $nodes the heap node of each result.
         $maker = eval(<<<PHP
             declare(strict_types=1);
-            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype, \$casters): array {
+            return static function (iterable \$rows, ?array &\$fresh = null, ?array &\$nodes = null, ?array &\$groups = null, ?array \$only = null) use (\$heap, \$make, \$prototype, \$relMap, \$nodePrototype, \$casters, \$zones): array {
                 \$result = [];
                 {$seenInit}                \$storage = \$heap->loadedStorage();
                 \$index = &\$heap->loadedIndex({$roleKey});

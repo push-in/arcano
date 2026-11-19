@@ -378,6 +378,11 @@ final class CompilerCache implements CompilerInterface
     {
         $hash = '';
         foreach ($columns as $column) {
+            if ($column instanceof SelectQuery) {
+                // A scalar subquery column: its parameters, not its interpolated values.
+                $hash .= 'sq_' . ($column->getPrefix() ?? '') . '(' . $this->hashSelectQuery($params, $column->getTokens()) . '),';
+                continue;
+            }
             if ($column instanceof Expression || $column instanceof Fragment || $column instanceof SubQuery) {
                 foreach ($column->getTokens()['parameters'] as $param) {
                     $params->push($param);

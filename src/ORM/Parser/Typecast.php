@@ -56,6 +56,11 @@ final class Typecast implements CastableInterface, UncastableInterface
      */
     private array $plain = [];
 
+    /** @var array<non-empty-string, true> Fields cast by the datetime rule. */
+    private array $datetimes = [];
+
+    private ?\DateTimeZone $timezone = null;
+
     /**
      * @param non-empty-string $role The role of the entity being typecasted
      * @param DatabaseInterface $database The database instance used for typecasting
@@ -67,8 +72,8 @@ final class Typecast implements CastableInterface, UncastableInterface
 
     public function setRules(array $rules): array
     {
-        $timezone = null;
         foreach ($rules as $key => $rule) {
+            unset($this->datetimes[$key]);
             // Static rules
             if (\in_array($rule, self::RULES, true)) {
                 $this->casters[$key] = match ($rule) {
@@ -76,10 +81,7 @@ final class Typecast implements CastableInterface, UncastableInterface
                     'bool' => static fn(mixed $value): bool => (bool) $value,
                     'float' => static fn(mixed $value): float => (float) $value,
                     // The driver timezone is fixed per connection: resolved once, not per value.
-                    'datetime' => function (mixed $value) use (&$timezone): \DateTimeImmutable {
-                        $timezone ??= $this->database->getDriver()->getTimezone();
-                        return new \DateTimeImmutable($value, $timezone);
-                    },
+                    'datetime' => fn (mixed $value): \DateTimeImmutable => new \DateTimeImmutable($value, $this->timezone()),
                     // Mostly an array, but can also be a scalar type.
                     'json' => static fn(mixed $value): mixed => \json_decode(
                         $value,
@@ -92,8 +94,10 @@ final class Typecast implements CastableInterface, UncastableInterface
                 if ($rule === 'int' || $rule === 'bool' || $rule === 'float') {
                     $this->plain[$key] = $rule;
                 } elseif ($rule === 'datetime') {
-                    // Database timestamps always parse: the maker calls the caster directly.
+                    // Database timestamps always parse: compiled makers construct them inline
+                    // in the driver timezone (see plainRules()).
                     $this->plain[$key] = $this->casters[$key];
+                    $this->datetimes[$key] = true;
                 } else {
                     unset($this->plain[$key]);
                 }
@@ -175,7 +179,24 @@ final class Typecast implements CastableInterface, UncastableInterface
      */
     public function plainRules(): ?array
     {
-        return \count($this->plain) === \count($this->casters) ? $this->plain : null;
+        if (\count($this->plain) !== \count($this->casters)) {
+            return null;
+        }
+        $rules = $this->plain;
+        foreach ($this->datetimes as $key => $_) {
+            // A datetime field: the zone its values are constructed in.
+            $rules[$key] = $this->timezone();
+        }
+
+        return $rules;
+    }
+
+    /**
+     * The driver timezone is fixed per connection: resolved once, not per value.
+     */
+    private function timezone(): \DateTimeZone
+    {
+        return $this->timezone ??= $this->database->getDriver()->getTimezone();
     }
 
     public function cast(array $data): array

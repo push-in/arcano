@@ -194,4 +194,26 @@ final class JsonExpressionTest extends TestCase
             protected function compile(string $statement): string {}
         };
     }
+
+    public static function unsafePathDataProvider(): \Traversable
+    {
+        // A backslash before the quote used to survive the escaping in MySQL's default sql_mode.
+        yield ["x\\' OR SLEEP(5) -- "];
+        yield ["x' OR SLEEP(5) -- "];
+        yield ['x" OR 1'];
+        yield ['x\\'];
+    }
+
+    /**
+     * @dataProvider unsafePathDataProvider
+     */
+    public function testWrapPathRejectsQuotesAndBackslashes(string $value): void
+    {
+        $expression = $this->createExpression();
+        $ref = new \ReflectionMethod($expression, 'wrapPath');
+        $ref->setAccessible(true);
+
+        $this->expectException(DriverException::class);
+        $ref->invoke($expression, $value);
+    }
 }

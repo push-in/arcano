@@ -151,7 +151,11 @@ abstract class JsonExpression implements FragmentInterface
      */
     private function wrapPath(string $value, string $delimiter = '->'): string
     {
-        $value = \preg_replace("/(\\+)?'/", "''", $value);
+        // Quotes and backslashes are refused instead of escaped: the escaping depended on the
+        // server's sql_mode (a backslash before a quote ended the string in MySQL).
+        if (\strpbrk($value, "'\"\\") !== false) {
+            throw new DriverException('JSON path segments cannot contain quotes or backslashes.');
+        }
 
         $segments = \explode($delimiter, $value);
         $path = \implode('.', \array_map(fn(string $segment): string => $this->wrapPathSegment($segment), $segments));

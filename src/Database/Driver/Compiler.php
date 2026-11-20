@@ -701,6 +701,8 @@ abstract class Compiler implements CompilerInterface
             $operator = $this->fragment($params, $q, $operator);
         } elseif (!\is_string($operator)) {
             throw new CompilerException('Invalid operator type, string or fragment is expected');
+        } else {
+            $operator = self::assertOperator($operator);
         }
 
         if ($value instanceof FragmentInterface) {
@@ -740,6 +742,36 @@ abstract class Compiler implements CompilerInterface
         }
 
         return $operator . ' ' . $placeholder;
+    }
+
+    /**
+     * Operators a string may name; anything else (a value smuggled into the operator position)
+     * is refused. Use an Expression for an operator outside this list.
+     */
+    private const OPERATORS = [
+        '=' => true, '==' => true, '!=' => true, '<>' => true, '<' => true, '>' => true, '<=' => true,
+        '>=' => true, '<=>' => true,
+        'LIKE' => true, 'NOT LIKE' => true, 'ILIKE' => true, 'NOT ILIKE' => true,
+        'IN' => true, 'NOT IN' => true, 'BETWEEN' => true, 'NOT BETWEEN' => true,
+        'IS' => true, 'IS NOT' => true, 'IS DISTINCT FROM' => true, 'IS NOT DISTINCT FROM' => true,
+        'REGEXP' => true, 'NOT REGEXP' => true, 'RLIKE' => true, 'NOT RLIKE' => true,
+        'SIMILAR TO' => true, 'NOT SIMILAR TO' => true, 'GLOB' => true, 'NOT GLOB' => true,
+        'MATCH' => true, '~' => true, '~*' => true, '!~' => true, '!~*' => true,
+        '@>' => true, '<@' => true, '&&' => true, '@@' => true, '&' => true, '|' => true, '^' => true,
+        '<<' => true, '>>' => true,
+    ];
+
+    /** @return non-empty-string the operator, upper-cased with single spaces */
+    private static function assertOperator(string $operator): string
+    {
+        $normalized = \strtoupper(\trim((string) \preg_replace('/\s+/', ' ', $operator)));
+        if (!isset(self::OPERATORS[$normalized])) {
+            throw new CompilerException(\sprintf(
+                'Unknown where operator %s; use an Expression for operators outside the allowed list',
+                \json_encode($operator, \JSON_INVALID_UTF8_SUBSTITUTE),
+            ));
+        }
+        return $normalized;
     }
 
     /**

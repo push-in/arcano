@@ -28,8 +28,10 @@ abstract class ConnectionConfig extends BaseConnectionConfig
          * @todo Replace with {@see \Pdo\Mysql::ATTR_INIT_COMMAND} when minimum PHP version is 8.5
          * @todo Should be moved into common driver settings?
          */
-        1002 => 'SET NAMES "UTF8"',
+        1002 => 'SET NAMES utf8mb4',
         \PDO::ATTR_STRINGIFY_FETCHES => false,
+        // Server-side prepares: values are never escaped and interpolated by the client.
+        \PDO::ATTR_EMULATE_PREPARES => false,
     ];
 
     /**

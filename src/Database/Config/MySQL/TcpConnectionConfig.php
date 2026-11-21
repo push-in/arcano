@@ -33,7 +33,7 @@ class TcpConnectionConfig extends ConnectionConfig implements ProvidesSourceStri
         public string $database,
         public string $host = 'localhost',
         int|string $port = 3307,
-        public ?string $charset = null,
+        public ?string $charset = 'utf8mb4',
         ?string $user = null,
         ?string $password = null,
         array $options = [],

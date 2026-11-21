@@ -51,6 +51,9 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
     /** @var \PDOStatement[]|PDOStatementInterface[] */
     protected array $queryCache = [];
 
+    /** Prepared statements kept per connection; the oldest is dropped past this. */
+    public const QUERY_CACHE_LIMIT = 512;
+
     private ?string $name = null;
     private ?\DateTimeZone $timezone = null;
     private ?string $timezoneName = null;
@@ -598,6 +601,10 @@ abstract class Driver implements DriverInterface, NamedInterface, LoggerAwareInt
 
         $statement = $this->getPDO()->prepare($query);
         if ($this->useCache) {
+            if (\count($this->queryCache) >= static::QUERY_CACHE_LIMIT) {
+                // Bounded for long-lived workers: drop the oldest prepared statement.
+                unset($this->queryCache[\array_key_first($this->queryCache)]);
+            }
             $this->queryCache[$query] = $statement;
         }
 

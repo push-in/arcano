@@ -29,6 +29,9 @@ use Arcano\Database\Query\SelectQuery;
  */
 final class CompilerCache implements CompilerInterface
 {
+    /** Compiled statements kept per compiler; the oldest is dropped past this. */
+    public const LIMIT = 2048;
+
     private array $cache = [];
 
     public function __construct(
@@ -55,11 +58,11 @@ final class CompilerCache implements CompilerInterface
                 return $this->cache[$queryHash];
             }
 
-            return $this->cache[$queryHash] = $this->compiler->compile(
+            return $this->store($queryHash, $this->compiler->compile(
                 new QueryParameters(),
                 $prefix,
                 $fragment,
-            );
+            ));
         }
 
         if ($fragment->getType() === self::INSERT_QUERY) {
@@ -71,11 +74,11 @@ final class CompilerCache implements CompilerInterface
                     return $this->cache[$queryHash];
                 }
 
-                return $this->cache[$queryHash] = $this->compiler->compile(
+                return $this->store($queryHash, $this->compiler->compile(
                     new QueryParameters(),
                     $prefix,
                     $fragment,
-                );
+                ));
             }
         }
 
@@ -88,11 +91,11 @@ final class CompilerCache implements CompilerInterface
                     return $this->cache[$queryHash];
                 }
 
-                return $this->cache[$queryHash] = $this->compiler->compile(
+                return $this->store($queryHash, $this->compiler->compile(
                     new QueryParameters(),
                     $prefix,
                     $fragment,
-                );
+                ));
             }
         }
 
@@ -441,5 +444,17 @@ final class CompilerCache implements CompilerInterface
         }
 
         return $hash;
+    }
+
+    /**
+     * @param non-empty-string $sql
+     * @return non-empty-string
+     */
+    private function store(string $hash, string $sql): string
+    {
+        if (\count($this->cache) >= self::LIMIT) {
+            unset($this->cache[\array_key_first($this->cache)]);
+        }
+        return $this->cache[$hash] = $sql;
     }
 }

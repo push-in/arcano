@@ -764,6 +764,9 @@ abstract class Compiler implements CompilerInterface
     /** @return non-empty-string the operator, upper-cased with single spaces */
     private static function assertOperator(string $operator): string
     {
+        if (isset(self::OPERATORS[$operator])) {
+            return $operator;
+        }
         $normalized = \strtoupper(\trim((string) \preg_replace('/\s+/', ' ', $operator)));
         if (!isset(self::OPERATORS[$normalized])) {
             throw new CompilerException(\sprintf(

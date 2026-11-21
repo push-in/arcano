@@ -26,7 +26,7 @@ class SocketConnectionConfig extends ConnectionConfig implements ProvidesSourceS
     public function __construct(
         public string $database,
         public string $socket,
-        public ?string $charset = null,
+        public ?string $charset = 'utf8mb4',
         ?string $user = null,
         ?string $password = null,
         array $options = [],

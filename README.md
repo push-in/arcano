@@ -97,6 +97,15 @@ Cycle documentation ([ORM](https://cycle-orm.dev/docs),
 [migrations](https://cycle-orm.dev/docs/database-migrations)) with the
 `Arcano\` namespaces.
 
+## Untrusted input
+
+- Values always go to the database as bound parameters (`where`, `limit`, `offset`, `IN` lists).
+- `where` operators must be one of the known SQL operators; anything else needs an `Expression`.
+- `orderBy()` and `groupBy()` accept a plain string only when it is a column name, `table.column`, `@.column` or a JSON path (`data->key`). A function call or any other SQL must be passed as a `Fragment`, so a sort key read from the query string cannot inject SQL. Still map user input to an allowlist of columns: an unknown column is a database error.
+- Column names given to `where()`, `columns()` and joins are trusted input and may contain expressions. Never pass user input there.
+- `limit()` and `offset()` refuse negative numbers. An empty `IN` list compiles to `1=0` (`NOT IN`: `1=1`).
+- In a long-lived worker (PAM, RoadRunner, Swoole), call `$dbal->rollbackOpenTransactions()` and `$orm->getHeap()->clean()` at the end of every request.
+
 ## Tests
 
 `vendor/bin/phpunit --testsuite <unit|sqlite|mysql|postgres|sqlserver>`. The

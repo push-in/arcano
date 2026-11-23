@@ -79,6 +79,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
     /** Shape plans shared by the clones of one select. */
     private \ArrayObject $shapes;
 
+    /** Stand-in for a limit or offset while a shape is planned; no page is this large. */
+    private const INT_SENTINEL = 1 << 40;
+
     private const RECORDABLE_OPERATORS = [
         '=' => true, '!=' => true, '<>' => true, '>' => true, '<' => true, '>=' => true, '<=' => true,
         'like' => true, 'not like' => true, 'LIKE' => true, 'NOT LIKE' => true,
@@ -411,6 +414,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function orderBy(string|FragmentInterface|array $expression, ?string $direction = 'ASC'): static
     {
+        \is_string($expression) and SelectQuery::assertPlainIdentifier($expression);
         if (!$this->customized && $this->record('orderBy', [$expression, $direction])) {
             return $this;
         }
@@ -647,15 +651,15 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                 $plan = $this->shapes[$key] = $page->shapePlan($this);
             }
             if ($plan) {
-                [$driver, $sql, $values, $slots, $maker] = $plan;
+                [$driver, $sql, $values, $slots, $maker, $countIndex] = $plan;
                 foreach ($slots as $index => $i) {
-                    $values[$index] = new Parameter($this->shapeValues[$i]);
+                    $values[$index] = new Parameter($page->shapeValues[$i]);
                 }
                 $statement = $driver->query($sql, $values);
                 $rows = $statement->fetchAll(StatementInterface::FETCH_NUM);
                 $statement->close();
                 if ($rows !== []) {
-                    return [$maker($rows), (int) $rows[0][\array_key_last($rows[0])]];
+                    return [$maker($rows), (int) $rows[0][$countIndex ?? \array_key_last($rows[0])]];
                 }
 
                 return [[], (clone $this)->count()];
@@ -763,6 +767,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function limit(int $limit): self
     {
+        $limit >= 0 or throw new \InvalidArgumentException('Limit must be zero or positive');
         $this->limit = $limit;
         if (!$this->customized && $this->record('limit', [$limit])) {
             return $this;
@@ -778,6 +783,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
      */
     public function offset(int $offset): self
     {
+        $offset >= 0 or throw new \InvalidArgumentException('Offset must be zero or positive');
         $this->offset = $offset;
         if (!$this->customized && $this->record('offset', [$offset])) {
             return $this;
@@ -1154,7 +1160,15 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
                 $this->shape .= "o\0{$args[0]}\0" . ($args[1] ?? "\2") . "\1";
                 break;
             default: // limit, offset
-                $this->shape .= "{$method}\0{$args[0]}\1";
+                // A limit above 1 or an offset above 0 is a statement parameter, so every page of
+                // a listing shares one plan. 0 and 1 change the statement (no LIMIT, the joined
+                // loaders' GROUP BY) and stay in the shape.
+                if ($args[0] > ($method === 'limit' ? 1 : 0)) {
+                    $this->shape .= "{$method}\0?\1";
+                    $value = $args[0];
+                } else {
+                    $this->shape .= "{$method}\0{$args[0]}\1";
+                }
         }
 
         if ($this->deferred === null) {
@@ -1254,9 +1268,16 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             return false;
         }
         $copy = clone $this;
+        // Limit and offset take int sentinels (above any real page size); where values strings.
+        $numeric = [];
+        foreach ($copy->recorded as [$method, , $slot]) {
+            if ($slot !== null && ($method === 'limit' || $method === 'offset')) {
+                $numeric[$slot] = true;
+            }
+        }
         $sentinels = [];
         foreach ($copy->shapeValues as $i => $_) {
-            $sentinels["\0arcano-value-{$i}\0"] = $i;
+            $sentinels[isset($numeric[$i]) ? self::INT_SENTINEL + $i : "\0arcano-value-{$i}\0"] = $i;
         }
         $copy->shapeValues = \array_keys($sentinels);
         $copy->applyRecorded();
@@ -1269,13 +1290,17 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         if ($countOf !== null) {
             // The count of the select without limit and offset, with the same values.
             $counted = clone $countOf;
-            if (\count($counted->shapeValues) !== \count($sentinels)) {
+            // The page select is this one plus limit/offset, whose values come last.
+            if (\count($counted->shapeValues) > \count($sentinels)) {
                 return false;
             }
-            $counted->shapeValues = $copy->shapeValues;
+            $counted->shapeValues = \array_slice($copy->shapeValues, 0, \count($counted->shapeValues));
             $counted->applyRecorded();
             $countQuery = $counted->buildQuery();
-            $query->columns([...$query->getColumns(), $countQuery->countQuery($counted->countColumn($countQuery))]);
+            $columns = $query->getColumns();
+            // Read by position: SQL Server's ORDER BY-less paging appends a ROW_NUMBER column.
+            $countIndex = \in_array('*', $columns, true) ? null : \count($columns);
+            $query->columns([...$columns, $countQuery->countQuery($counted->countColumn($countQuery))]);
         }
         $parameters = new QueryParameters();
         $sql = $query->sqlStatement($parameters);
@@ -1284,7 +1309,7 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
         $slots = [];
         foreach ($values as $index => $value) {
             $raw = $value instanceof ParameterInterface ? $value->getValue() : $value;
-            if (!\is_string($raw) || !\str_contains($raw, "\0arcano-value-")) {
+            if (\is_int($raw) ? $raw < self::INT_SENTINEL : !\is_string($raw) || !\str_contains($raw, "\0arcano-value-")) {
                 continue;
             }
             $slot = $sentinels[$raw] ?? null;
@@ -1294,7 +1319,9 @@ class Select implements \IteratorAggregate, \Countable, PaginableInterface
             $slots[$index] = $slot;
         }
 
-        return \count(\array_unique($slots)) === \count($sentinels) ? [$query->getDriver(), $sql, $values, $slots, $maker] : false;
+        return \count(\array_unique($slots)) === \count($sentinels)
+            ? [$query->getDriver(), $sql, $values, $slots, $maker, $countIndex ?? null]
+            : false;
     }
 
     /**

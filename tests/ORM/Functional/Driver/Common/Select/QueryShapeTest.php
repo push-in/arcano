@@ -121,6 +121,67 @@ abstract class QueryShapeTest extends BaseTest
         $this->assertSame([1, 2], $this->ids($repository->select()->where('balance', '<', 250)->orderBy(['id' => 'ASC'])->fetchAll()));
     }
 
+    public function testEveryPageOfAListingSharesOnePlan(): void
+    {
+        $repository = $this->orm->getRepository(User::class);
+        $pages = [];
+        foreach ([0, 1, 2, 5] as $offset) {
+            [$users, $total] = $repository->select()->orderBy('id')->fetchPage(2, $offset);
+            $pages[] = [$this->ids($users), $total];
+        }
+        foreach ([2, 3] as $limit) {
+            $pages[] = $this->ids($repository->select()->orderBy('id')->limit($limit)->offset(1)->fetchAll());
+        }
+
+        $this->assertSame([[[1, 2], 3], [[2, 3], 3], [[3], 3], [[], 3], [2, 3], [2, 3]], $pages);
+        $shapes = (new \ReflectionProperty(\Arcano\ORM\Select::class, 'shapes'))->getValue($repository->select());
+        // Page + count from the first row, page + count past it, limit + offset: the numbers
+        // themselves are statement parameters.
+        $this->assertCount(3, $shapes);
+    }
+
+    public function testPageTotalWithoutOrderBy(): void
+    {
+        [$users, $total] = $this->orm->getRepository(User::class)->select()->where('balance', '>', 50)->fetchPage(1, 0);
+
+        $this->assertCount(1, $users);
+        $this->assertSame(3, $total);
+        [$users, $total] = $this->orm->getRepository(User::class)->select()->where('balance', '>', 50)->fetchPage(2, 1);
+        $this->assertCount(2, $users);
+        $this->assertSame(3, $total);
+    }
+
+    public function testNegativeLimitAndOffsetAreRefused(): void
+    {
+        $select = $this->orm->getRepository(User::class)->select();
+
+        try {
+            $select->limit(-1);
+            $this->fail('negative limit accepted');
+        } catch (\InvalidArgumentException) {
+        }
+        $this->expectException(\InvalidArgumentException::class);
+        $select->offset(-1);
+    }
+
+    public function testEmptyInListMatchesNothingAndEmptyNotInEverything(): void
+    {
+        $repository = $this->orm->getRepository(User::class);
+
+        $this->assertSame([], $this->ids($repository->select()->where('id', 'in', new \Arcano\Database\Injection\Parameter([]))->fetchAll()));
+        $this->assertSame([1, 2, 3], $this->ids(
+            $repository->select()->where('id', 'not in', new \Arcano\Database\Injection\Parameter([]))->orderBy('id')->fetchAll(),
+        ));
+    }
+
+    public function testSortKeyFromUserInputCannotInjectSql(): void
+    {
+        $this->expectException(\Arcano\Database\Exception\BuilderException::class);
+        $this->orm->getRepository(User::class)->select()
+            ->orderBy('(SELECT(CASE(1)WHEN(1)THEN(1)END))')
+            ->fetchAll();
+    }
+
     private function ids(iterable $users): array
     {
         $ids = [];

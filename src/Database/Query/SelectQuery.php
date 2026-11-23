@@ -16,6 +16,7 @@ use Arcano\Database\Injection\Fragment;
 use Arcano\Database\Injection\SubQuery;
 use Arcano\Database\Query\Traits\WhereJsonTrait;
 use Arcano\Database\Driver\CompilerInterface;
+use Arcano\Database\Exception\BuilderException;
 use Arcano\Database\Injection\FragmentInterface;
 use Arcano\Database\Query\Traits\HavingTrait;
 use Arcano\Database\Query\Traits\JoinTrait;
@@ -56,6 +57,13 @@ class SelectQuery extends ActiveQuery implements
     protected bool $forUpdate = false;
     private ?int $limit = null;
     private ?int $offset = null;
+
+    /**
+     * What a plain string may name in ORDER BY / GROUP BY: a column, `table.column`, `@.column`
+     * or a JSON path (`data->key[0]`). Expressions (functions, spaces, quotes) must come as an
+     * {@see Fragment} or {@see Expression}, so a sort key taken from user input cannot inject SQL.
+     */
+    private const PLAIN_IDENTIFIER = '/^(?:@|[A-Za-z0-9_$:]+)(?:\.[A-Za-z0-9_$:]+)*(?:->[A-Za-z0-9_\-\[\]]+)*$/D';
 
     /**
      * @param array $from Initial set of table names.
@@ -179,6 +187,7 @@ class SelectQuery extends ActiveQuery implements
      */
     public function groupBy(string|Fragment|Expression $expression): self
     {
+        \is_string($expression) and self::assertPlainIdentifier($expression, 'groupBy');
         $this->groupBy[] = $expression;
 
         return $this;
@@ -250,6 +259,7 @@ class SelectQuery extends ActiveQuery implements
      */
     public function limit(?int $limit = null): self
     {
+        $limit === null || $limit >= 0 or throw new BuilderException('Limit must be zero or positive');
         $this->limit = $limit;
 
         return $this;
@@ -269,6 +279,7 @@ class SelectQuery extends ActiveQuery implements
      */
     public function offset(?int $offset = null): self
     {
+        $offset === null || $offset >= 0 or throw new BuilderException('Offset must be zero or positive');
         $this->offset = $offset;
 
         return $this;
@@ -445,11 +456,26 @@ class SelectQuery extends ActiveQuery implements
      *
      * @return $this|self
      */
+    /**
+     * Refuses a string that is not a plain column name or JSON path.
+     *
+     * @throws BuilderException
+     */
+    public static function assertPlainIdentifier(string $identifier, string $clause = 'orderBy'): void
+    {
+        \preg_match(self::PLAIN_IDENTIFIER, $identifier) === 1 or throw new BuilderException(\sprintf(
+            '%s() takes a column name; wrap the expression %s in a Fragment to use it as raw SQL',
+            $clause,
+            \json_encode($identifier, \JSON_INVALID_UTF8_SUBSTITUTE),
+        ));
+    }
+
     private function addOrder(string|FragmentInterface $field, ?string $order): self
     {
         if (!\is_string($field)) {
             $this->orderBy[] = [$field, $order];
         } elseif (!\array_key_exists($field, $this->orderBy)) {
+            self::assertPlainIdentifier($field);
             $this->orderBy[$field] = [$field, $order];
         }
         return $this;

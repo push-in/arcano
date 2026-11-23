@@ -91,6 +91,17 @@ abstract class SelectQueryTest extends BaseTest
         );
     }
 
+    public function testEmptyInListCompilesToFalseAndEmptyNotInToTrue(): void
+    {
+        $select = $this->database->select()->from('table')
+            ->where('id', 'IN', new Parameter([]))
+            ->orWhere('id', 'NOT IN', new Parameter([]))
+            ->orWhere('id', '=', new Parameter([]));
+
+        $this->assertSameQuery('SELECT * FROM {table} WHERE 1=0 OR 1=1 OR 1=0', $select);
+        $this->assertSameParameters([], $select);
+    }
+
     public function testArrayWhere(): void
     {
         $select = $this->database

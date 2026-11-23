@@ -673,6 +673,13 @@ abstract class Compiler implements CompilerInterface
                 continue;
             }
 
+            // An empty IN list matches no row and an empty NOT IN every row; `x IN ()` is a syntax error.
+            if (\is_string($context[0]) && ($empty = self::emptyInList($context)) !== null) {
+                $statement .= $empty;
+                $statement .= ' ';
+                continue;
+            }
+
             // identifier can be column name, expression or even query builder
             $statement .= $this->name($params, $q, $context[0]);
             $statement .= ' ';
@@ -828,6 +835,21 @@ abstract class Compiler implements CompilerInterface
         );
 
         return \implode(', ', $parts);
+    }
+
+    /** `1=0` / `1=1` for a condition on an empty list, null for anything else. */
+    private static function emptyInList(array $context): ?string
+    {
+        $value = $context[2] ?? null;
+        if (!$value instanceof ParameterInterface || !$value->isArray() || $value->getValue() !== [] || !\is_string($context[1])) {
+            return null;
+        }
+
+        return match (\strtoupper(\trim($context[1]))) {
+            'IN', '=' => '1=0',
+            'NOT IN', '!=' => '1=1',
+            default => null,
+        };
     }
 
     private function arrayToInOperator(QueryParameters $params, Quoter $q, array $values, bool $in): string

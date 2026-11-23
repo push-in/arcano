@@ -6,6 +6,7 @@ namespace Arcano\Database\Tests\Unit\Query\Tokens;
 
 use PHPUnit\Framework\TestCase;
 use Arcano\Database\Driver\CompilerInterface;
+use Arcano\Database\Injection\Fragment;
 use Arcano\Database\Injection\Parameter;
 use Arcano\Database\Query\SelectQuery;
 
@@ -21,10 +22,10 @@ class SelectQueryTest extends TestCase
             ->orWhere('id', '>', 1)
             ->orderBy('name', 'ASC')
             ->orderBy('id', 'DESC')
-            ->orderBy('RAND()', null)
+            ->orderBy($rand = new Fragment('RAND()'), null)
             ->orderBy([
-                'FOO()' => null,
-                'COALESCE(name, test)',
+                $foo = new Fragment('FOO()'),
+                $coalesce = new Fragment('COALESCE(name, test)'),
             ]);
 
         $this->assertSame(
@@ -54,9 +55,9 @@ class SelectQueryTest extends TestCase
                 'orderBy' => [
                     ['name', 'ASC'],
                     ['id', 'DESC'],
-                    ['RAND()', null],
-                    ['FOO()', null],
-                    ['COALESCE(name, test)', null],
+                    [$rand, null],
+                    [$foo, null],
+                    [$coalesce, null],
                 ],
                 'limit' => null,
                 'offset' => null,

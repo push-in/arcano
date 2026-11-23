@@ -170,6 +170,36 @@ final class DatabaseManager implements DatabaseProviderInterface, LoggerAwareInt
     }
 
     /**
+     * Rolls back every transaction left open on the drivers already in use, for a long-lived
+     * worker to call when a request ends: a request that threw between begin and commit
+     * must not leave its transaction (and its locks) to the next request.
+     *
+     * @return int transaction levels rolled back
+     */
+    public function rollbackOpenTransactions(): int
+    {
+        $rolledBack = 0;
+        foreach ($this->drivers as $driver) {
+            while ($driver->getTransactionLevel() > 0) {
+                $level = $driver->getTransactionLevel();
+                try {
+                    $driver->rollbackTransaction();
+                } catch (\Throwable) {
+                    // A broken connection loses its transaction anyway; start clean.
+                    $driver->disconnect();
+                }
+                ++$rolledBack;
+                if ($driver->getTransactionLevel() >= $level) {
+                    $driver->disconnect();
+                    break;
+                }
+            }
+        }
+
+        return $rolledBack;
+    }
+
+    /**
      * Get driver instance.
      *
      * @psalm-param non-empty-string $driver

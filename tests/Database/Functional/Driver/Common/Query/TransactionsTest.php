@@ -4,11 +4,29 @@ declare(strict_types=1);
 
 namespace Arcano\Database\Tests\Functional\Driver\Common\Query;
 
+use Arcano\Database\Config\DatabaseConfig;
 use Arcano\Database\Database;
+use Arcano\Database\DatabaseManager;
 use Arcano\Database\Tests\Functional\Driver\Common\BaseTest;
 
 abstract class TransactionsTest extends BaseTest
 {
+    public function testOpenTransactionsAreRolledBackAtTheEndOfARequest(): void
+    {
+        $dbal = new DatabaseManager(new DatabaseConfig(['default' => 'default', 'databases' => [], 'connections' => []]));
+        $dbal->addDriver('request', $this->database->getDriver());
+
+        $this->database->begin();
+        $this->database->table->insertOne(['name' => 'Anton', 'value' => 123]);
+        $this->database->begin();
+        $this->database->table->insertOne(['name' => 'John', 'value' => 456]);
+
+        $this->assertSame(2, $dbal->rollbackOpenTransactions());
+        $this->assertSame(0, $this->database->getDriver()->getTransactionLevel());
+        $this->assertSame(0, $this->database->table->count());
+        $this->assertSame(0, $dbal->rollbackOpenTransactions());
+    }
+
     public function testCommitTransactionInsert(): void
     {
         $this->database->begin();

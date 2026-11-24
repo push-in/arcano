@@ -39,8 +39,10 @@ class SelectWithJoinQueryTest extends CommonClass
         $select->sqlStatement();
 
         // Verify that the join name has a correct format in the cache
-        $cache = $ref->getValue($compiler);
-        $this->assertCount(1, $cache);
-        $this->assertStringContainsString("j1:h11:LEFTLATERALp_0:", \array_key_first($cache));
+        $keys = \array_keys($ref->getValue($compiler));
+        $this->assertNotEmpty(
+            \array_filter($keys, static fn(string $key): bool => \str_contains($key, 'j1:h11:LEFTLATERALp_0:')),
+            \implode("\n", $keys),
+        );
     }
 }

@@ -21,8 +21,8 @@
     "require-dev": {
         "buggregator/trap": "^1.15",
         "doctrine/annotations": "^1.14 || ^2.0",
-        "doctrine/collections": "^1.6 || ^2.0",
-        "illuminate/collections": "9 - 12",
+        "doctrine/collections": "^1.6 || ^2.0 || ^3.0",
+        "illuminate/collections": "9 - 14",
         "jetbrains/phpstorm-attributes": "^1.0",
         "loophp/collection": "^6.0 || ^7.0",
         "mockery/mockery": "^1.5",

@@ -149,25 +149,36 @@ class OnConflict
      */
     public function getCacheKey(QueryParameters $params): string
     {
-        $key = 'T' . \implode('_', $this->target) . 'A' . $this->action->name;
+        // Every name is length-prefixed so different column lists never share a key.
+        $key = 'T';
+        foreach ($this->target as $column) {
+            $key .= \strlen($column) . ':' . $column;
+        }
+        $key .= 'A' . $this->action->name;
 
         if ($this->update === null) {
             return $key . 'UN';
         }
 
         if (\array_is_list($this->update)) {
-            return $key . 'UL' . \implode('_', $this->update);
+            $key .= 'UL';
+            foreach ($this->update as $column) {
+                $key .= \strlen((string) $column) . ':' . $column;
+            }
+
+            return $key;
         }
 
         $key .= 'UM';
         foreach ($this->update as $column => $value) {
-            $key .= $column . '=';
+            $key .= \strlen((string) $column) . ':' . $column . '=';
 
             if ($value instanceof FragmentInterface) {
                 foreach ($value->getTokens()['parameters'] as $fragmentParam) {
                     $params->push($fragmentParam);
                 }
-                $key .= $value;
+                $fragment = (string) $value;
+                $key .= 'F' . \strlen($fragment) . ':' . $fragment;
                 continue;
             }
 

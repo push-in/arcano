@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.suite }}, PHP ${{ matrix.php }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+        suite: [unit, sqlite, mysql, postgres, sqlserver]
+        exclude:
+          - php: '8.5'
+            suite: sqlserver
+    services:
+      mysql:
+        image: ${{ matrix.suite == 'mysql' && 'mysql:8.0' || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: YourStrong!Passw0rd
+          MYSQL_DATABASE: spiral
+        ports: ['13306:3306']
+        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: ${{ matrix.suite == 'postgres' && 'postgres:16-alpine' || '' }}
+        env:
+          POSTGRES_PASSWORD: YourStrong!Passw0rd
+          POSTGRES_DB: spiral
+        ports: ['15432:5432']
+        options: --health-cmd="pg_isready" --health-interval=5s --health-timeout=5s --health-retries=20
+      sqlserver:
+        image: ${{ matrix.suite == 'sqlserver' && 'mcr.microsoft.com/mssql/server:2022-latest' || '' }}
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: YourStrong!Passw0rd
+        ports: ['11433:1433']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the Microsoft ODBC driver
+        if: matrix.suite == 'sqlserver'
+        run: |
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/24.04/prod noble main" | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo, pdo_sqlite, pdo_mysql, pdo_pgsql, ${{ matrix.suite == 'sqlserver' && 'sqlsrv, pdo_sqlsrv' || '' }}
+          coverage: none
+      - uses: ramsey/composer-install@26d8a556604053a9612623447203a691f406fbe6 # v4
+      - name: Wait for SQL Server
+        if: matrix.suite == 'sqlserver'
+        run: |
+          for i in $(seq 60); do
+            php -r 'try { new PDO("sqlsrv:Server=127.0.0.1,11433;TrustServerCertificate=true", "SA", "YourStrong!Passw0rd"); exit(0); } catch (Throwable $e) { fwrite(STDERR, $e->getMessage() . "\n"); exit(1); }' && exit 0
+            sleep 3
+          done
+          exit 1
+      - run: vendor/bin/phpunit --testsuite "$SUITE"
+        env:
+          SUITE: ${{ matrix.suite }}
+
+  sql-fuzz:
+    name: SQL escaping fuzz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+      - uses: ramsey/composer-install@26d8a556604053a9612623447203a691f406fbe6 # v4
+      # The unit suite runs the fixed seed; this job adds a fresh seed per run, printed so a
+      # failure reproduces locally with ARCANO_FUZZ_SEED=<seed>.
+      - name: Fuzz with the fixed and a per-run seed
+        env:
+          RUN_SEED: ${{ github.run_id }}
+        run: |
+          vendor/bin/phpunit tests/Database/Unit/Driver/EscapingFuzzTest.php
+          echo "Per-run seed: $RUN_SEED"
+          ARCANO_FUZZ_SEED="$RUN_SEED" ARCANO_FUZZ_ITERATIONS=5000 vendor/bin/phpunit tests/Database/Unit/Driver/EscapingFuzzTest.php
+
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+      - uses: ramsey/composer-install@26d8a556604053a9612623447203a691f406fbe6 # v4
+      - run: vendor/bin/phpstan analyse --no-progress --memory-limit=2G --error-format=github
+
+  psalm-taint:
+    name: Psalm taint analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+      - uses: ramsey/composer-install@26d8a556604053a9612623447203a691f406fbe6 # v4
+      - run: vendor/bin/psalm --taint-analysis --no-progress --no-cache --output-format=github
+
+  audit:
+    name: Composer audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer
+      - uses: ramsey/composer-install@26d8a556604053a9612623447203a691f406fbe6 # v4
+      - name: composer audit
+        run: |
+          for attempt in 1 2 3; do
+            # A vulnerable package fails every attempt; a Packagist network blip does not.
+            composer audit --no-interaction --abandoned=report && exit 0
+            echo "composer audit failed (attempt $attempt), retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1
+      # roave/security-advisories refuses to install next to any package version with a known
+      # advisory. It is not in composer.json because it also conflicts with PHP patch releases
+      # that distributions backport fixes into; the platform check is left to setup-php.
+      - name: roave/security-advisories conflict guard
+        run: |
+          for attempt in 1 2 3; do
+            composer require --dev --no-interaction --no-progress --dry-run --ignore-platform-req=php \
+              roave/security-advisories:dev-latest && exit 0
+            echo "conflict guard failed (attempt $attempt), retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+  required:
+    name: Required checks
+    if: always()
+    needs: [tests, sql-fuzz, phpstan, psalm-taint, audit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every gating job passed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          echo "$RESULTS" | jq -e 'all(.[]; . == "success")' > /dev/null

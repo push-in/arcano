@@ -322,7 +322,8 @@ abstract class Compiler implements CompilerInterface
             $parts[] = \sprintf(
                 '%s%s = %s',
                 $targetPrefix,
-                $this->name($params, $q, $column),
+                // PHP turns numeric-string keys ("0", "2024") into ints; names are strings.
+                $this->name($params, $q, (string) $column),
                 $this->value($params, $q, $value),
             );
         }
@@ -511,7 +512,8 @@ abstract class Compiler implements CompilerInterface
         foreach ($tokens['values'] as $column => $value) {
             $values[] = \sprintf(
                 '%s = %s',
-                $this->name($parameters, $quoter, $column),
+                // PHP turns numeric-string keys ("0", "2024") into ints; names are strings.
+                $this->name($parameters, $quoter, (string) $column),
                 $this->value($parameters, $quoter, $value),
             );
         }

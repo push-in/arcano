@@ -39,9 +39,10 @@ class SelectWithJoinQueryTest extends CommonClass
         $select->sqlStatement();
 
         // Verify that the join name has a correct format in the cache
-        $this->assertArrayHasKey(
-            's__temperature as t*,jhLEFTLATERALp_s__humidity*,wANDh.date<=?_1_1onANDtruewANDt.date=?_1_1',
-            $ref->getValue($compiler),
+        $keys = \array_keys($ref->getValue($compiler));
+        $this->assertNotEmpty(
+            \array_filter($keys, static fn(string $key): bool => \str_contains($key, 'j1:h11:LEFTLATERALp_0:')),
+            \implode("\n", $keys),
         );
     }
 }

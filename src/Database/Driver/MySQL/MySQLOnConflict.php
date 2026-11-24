@@ -89,6 +89,6 @@ final class MySQLOnConflict extends OnConflict
 
     public function getCacheKey(QueryParameters $params): string
     {
-        return parent::getCacheKey($params) . 'RA' . $this->rowAlias;
+        return parent::getCacheKey($params) . 'RA' . \strlen((string) $this->rowAlias) . ':' . $this->rowAlias;
     }
 }

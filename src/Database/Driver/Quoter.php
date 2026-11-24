@@ -74,14 +74,13 @@ final class Quoter
             return '*';
         }
 
+        // Only the closing delimiter needs doubling: "a""b" for ANSI/MySQL quotes and [a]]b] for
+        // SQL Server, where an opening bracket inside the name is a literal character. A single
+        // str_replace() pass keeps a quote from being doubled twice when left and right are equal.
         $identifier = \sprintf(
             '%s%s%s',
             $this->left,
-            \str_replace(
-                [$this->left, $this->right],
-                [$this->left . $this->left, $this->right . $this->right],
-                $identifier,
-            ),
+            \str_replace($this->right, $this->right . $this->right, $identifier),
             $this->right,
         );
 

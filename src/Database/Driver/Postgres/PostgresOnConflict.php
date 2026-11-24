@@ -91,7 +91,7 @@ final class PostgresOnConflict extends OnConflictWithPredicate
     {
         $key = parent::getCacheKey($params);
         if ($this->constraint !== null) {
-            $key .= 'C' . $this->constraint;
+            $key .= 'C' . \strlen($this->constraint) . ':' . $this->constraint;
         }
         return $key;
     }

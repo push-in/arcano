@@ -336,6 +336,23 @@ class QuoterTest extends TestCase
         );
     }
 
+    public function testClosingDelimiterIsDoubledOnce(): void
+    {
+        // str_replace() with [left, right] used to double an equal-delimiter quote twice.
+        $this->assertSame('"a""b"', $this->makeQuoter()->identifier('a"b'));
+        $this->assertSame('`a``b`', $this->makeQuoter('', '``')->identifier('a`b'));
+        $this->assertSame('"a"""', $this->makeQuoter()->quote('a"'));
+    }
+
+    public function testSqlServerDoublesOnlyTheClosingBracket(): void
+    {
+        $quoter = $this->makeQuoter('', '[]');
+
+        $this->assertSame('[a]]b]', $quoter->identifier('a]b'));
+        $this->assertSame('[a[b]', $quoter->identifier('a[b'));
+        $this->assertSame('[x]]].[y]', $quoter->identifier('x].y'));
+    }
+
     protected function makeQuoter(string $prefix = '', string $quote = '""'): Quoter
     {
         return new Quoter($prefix, $quote);

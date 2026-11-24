@@ -1,0 +1,10 @@
+# Kept out of the Composer dist archive (Packagist zip): only src/, the licenses and the
+# README reach an application's vendor/.
+/.github          export-ignore
+/.gitattributes   export-ignore
+/.gitignore       export-ignore
+/benchmarks       export-ignore
+/docs             export-ignore
+/phpunit.xml      export-ignore
+/phpunit.xml.dist export-ignore
+/tests            export-ignore
